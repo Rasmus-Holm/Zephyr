@@ -1,3 +1,3 @@
 # Zephyr
 
-Forsøg på at skabe en merge konflikt
+Her er forsøget på en merge konflikt
