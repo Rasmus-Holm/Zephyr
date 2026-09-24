@@ -1,0 +1,12 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.generator": "Ninja",
+    "c_cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "search.exclude": {
+        "build": true
+    },
+    "files.exclude": {
+        "build": true
+    }
+}

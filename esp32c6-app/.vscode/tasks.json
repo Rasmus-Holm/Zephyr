@@ -1,0 +1,30 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Zephyr: Build",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/build.sh",
+            "args": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Zephyr: Byg (clean)",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/build.sh",
+            "args": ["-p"],
+            "problemMatcher": []
+        },
+        {
+            "label": "Zephyr: Flash",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/flash.sh",
+            "group": "build",
+            "problemMatcher": []
+        }
+    ]
+}

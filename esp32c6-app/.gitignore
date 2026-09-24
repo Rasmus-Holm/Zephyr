@@ -1,0 +1,12 @@
+# Zephyr build-artefakter
+build/
+
+# PyCharm/VSCode
+.idea/
+*.iml
+.vscode-server/
+
+# Misc
+*.orig
+*.rej
+*.swp
