@@ -1,0 +1,61 @@
+# Copyright 2025 NXP
+# SPDX-License-Identifier: Apache-2.0
+
+mainmenu "Wi-Fi MQTT TLS application"
+
+config WIFI_SAMPLE_SSID
+	string "SSID of the target AP"
+	default "CHANGE_ME_WIFI_SSID"
+	help
+	  SSID of the access point to connect to in station mode.
+	  For example: "TARGET-AP"
+
+config WIFI_SAMPLE_PSK
+	string "Pre-shared key for target AP"
+	default "CHANGE_ME_WIFI_PSK"
+	help
+	  WPA2 password used to connect to the target AP.
+	  For example: "PSK"
+
+config WIFI_SAMPLE_DHCPV4_START
+	bool "Start DHCPv4 server in application layer."
+	default y
+	help
+	  Enable this option to start the DHCPv4 server from the application layer,
+	  typically before the Soft AP is initialized.
+
+	  When disabled, the DHCPv4 server startup timing is determined by the vendor's
+	  implementation. In some cases, the server may be started after the AP is up,
+	  using the vendor's default IP address, gateway, subnet mask.
+
+config MQTT_BROKER_ADDRESS
+	string "MQTT broker IPv4 address"
+	default "CHANGE_ME_BROKER_IP"
+	help
+	  IPv4 address of the local Mosquitto broker.
+
+config MQTT_CLIENT_ID
+	string "MQTT client ID"
+	default "esp32c6-wifi-tls"
+
+config MQTT_TOPIC
+	string "MQTT test topic"
+	default "iot/test"
+
+config MQTT_SNTP_SERVER
+	string "SNTP server name or IPv4 address"
+	default "pool.ntp.org"
+	help
+	  Server asked for the time before TLS. A name needs a DNS server; an IPv4 address does not.
+
+config NETWORK_CELLULAR
+	bool "Use the Stamp CatM modem (PPP) instead of Wi-Fi"
+	default n
+	help
+	  Selects the modem network layer in src/main.c with #if. Wi-Fi remains the default.
+
+config NETWORK_IPV4_TIMEOUT_SECONDS
+	int "Seconds to wait for an IPv4 address"
+	default 30
+
+source "Kconfig.zephyr"

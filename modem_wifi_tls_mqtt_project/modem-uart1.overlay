@@ -1,0 +1,48 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/esp-pinctrl-common.h>
+#include <zephyr/dt-bindings/pinctrl/esp32c6-pinctrl.h>
+
+/ {
+	aliases {
+		modem = &modem;
+	};
+};
+
+/*
+ * Copied from cellular-ppp/app.overlay, which is the tested reference.
+ * Keep the two in sync when either changes.
+ *
+ * GPIO16/17 (uart0) share nets with the CP2102N bridge on the DevKitC-1 and the
+ * modem stays silent there, so it sits on uart1 with GPIO18 TX and GPIO19 RX.
+ */
+&pinctrl {
+	uart1_modem: uart1_modem {
+		group1 {
+			pinmux = <UART1_TX_GPIO18>;
+			output-high;
+		};
+
+		group2 {
+			pinmux = <UART1_RX_GPIO19>;
+			bias-pull-up;
+		};
+	};
+};
+
+/* Stamp CatM on uart1, wired crosswise: Stamp TX to GPIO19, Stamp RX to GPIO18. */
+&uart1 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart1_modem>;
+	pinctrl-names = "default";
+
+	modem: modem {
+		compatible = "simcom,sim7080";
+		status = "okay";
+		/*
+		 * PWRKEY is not exposed on the Stamp CatM header, so this pin is
+		 * deliberately left unconnected. The binding requires a property.
+		 */
+		mdm-power-gpios = <&gpio0 10 GPIO_ACTIVE_HIGH>;
+	};
+};
