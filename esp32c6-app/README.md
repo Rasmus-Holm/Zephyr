@@ -112,3 +112,32 @@ Forventet output:
 Hello World! esp32c6_devkitc/esp32c6/hpcore
 ... <inf> zephyr_app: Kører - uptime: ... ms
 ```
+
+## Byg, flash og monitor
+
+Miljøet skal være aktiveret (f.eks. via `source ~/zephyrproject/.venv/bin/activate` eller `zephyr-env`).
+
+### Byg
+```bash
+west build -p always -b esp32c6_devkitc/esp32c6/hpcore ./esp32c6-app -d ./esp32c6-app/build
+```
+
+### Flash
+```bash
+west flash --runner esptool
+```
+
+### Monitor (USB Serial/JTAG)
+Der kræves **ikke** ekstern UART-adapter. Konsollen vises på `/dev/ttyACM0` via USB Serial/JTAG.
+
+Med West (Espressif runner):
+```bash
+west espressif monitor
+```
+
+Eller med projektets script:
+```bash
+./esp32c6-app/scripts/console.sh
+```
+
+Efter reset af boardet skal `LOG_INF`, `LOG_WRN` og `LOG_ERR` vises korrekt i monitoren.
