@@ -1,36 +1,55 @@
 # esp32c6-app
 
-Zephyr-start-skelet til **ESP32-C6 DevKitC** (Zephyr v4.4.0).
+Zephyr-projekt til **ESP32-C6 DevKitC** (Zephyr v4.4.0, 4 MB flash).
+
+Konsollen kører boardets **USB Serial/JTAG**-controller og vises som
+`/dev/ttyACM0`, når DevKitC'en sluttes til USB.
+
+## Kloning
+
+```bash
+git clone https://github.com/Rasmus-Holm/Zephyr.git
+cd Zephyr/esp32c6-app
+```
+
+## Forudsætninger
+
+- West-workspace: `~/zephyrproject` (Zephyr v4.4.0, venv i `~/zephyrproject/.venv`)
+- Zephyr SDK: `~/zephyr-sdk-1.0.1`
+- West-workspacet sættes op med `Setup-Zephyr.sh` fra repoets rod
 
 ## Mappestruktur
 
 ```
 esp32c6-app/
-├── CMakeLists.txt        # Zephyr build-definition
-├── prj.conf              # Kconfig-konfiguration (tomt skelet)
-├── src/main.c            # App-kode
-├── scripts/              # Byg-/flash-scripts
+├── CMakeLists.txt        # Build-definition (board: esp32c6_devkitc/esp32c6/hpcore)
+├── prj.conf              # Kconfig (USB-serial-konsol + logging)
+├── app.overlay           # Vælger USB Serial/JTAG som zephyr,console
+├── src/main.c            # Hello World-app
+├── scripts/              # Byg-/flash-/monitor-scripts
 │   ├── zephyr-env.sh     # Sætter miljøet (source det manuelt hvis ønsket)
 │   ├── build.sh          # Bygger via west
-│   └── flash.sh          # Flasher via esptool
+│   ├── flash.sh          # Flasher via esptool
+│   └── monitor.sh        # Åbner serial monitor på /dev/ttyACM0
 └── .vscode/              # VSCode-tasks (build/flash)
 ```
-
-## Afhængigheder (allerede installeret på denne maskine)
-
-- West-workspace: `~/zephyrproject` (Zephyr v4.4.0, venv i `~/zephyrproject/.venv`)
-- Zephyr SDK: `~/zephyr-sdk-1.0.1`
-- `west`, `esptool` m.m. ligger i venv'et
 
 ## Byg
 
 ```bash
-cd ~/zephyr-apps/esp32c6-app
+cd Zephyr/esp32c6-app
 scripts/build.sh          # inkrementelt
 scripts/build.sh -p       # ren byg
 ```
 
-Build-output ligger i `build/` (fx `build/zephyr/zephyr.elf`).
+Uden scriptet (kræver at workspacet er initieret, eller `ZEPHYR_BASE` er sat):
+
+```bash
+west build -b esp32c6_devkitc/esp32c6/hpcore -d build
+```
+
+Boardet er også sat i `CMakeLists.txt`, så `west build -d build` uden `-b`
+virker. Build-output ligger i `build/` (fx `build/zephyr/zephyr.elf`).
 
 ## Flash
 
@@ -40,16 +59,24 @@ Slut ESP32-C6 DevKitC'en til USB og kør:
 scripts/flash.sh
 ```
 
-Runner: `esp32` (esptool). Hvis flere porte findes, kan porten sættes med:
-`west flash -d build --runner esp32 --elf-name zephyr.elf` eller angiv port direkte med `esptool`'s port-argument.
-
-## Seriel konsol
-
-Konsollen er som standard på boardets UART (USB-serielforbindelse, 115200 baud):
+Det svarer til:
 
 ```bash
-screen /dev/ttyUSB0 115200    # eller: picocom /dev/ttyUSB0 -b 115200
+west flash -d build --runner esp32
 ```
+
+## Monitor (USB Serial/JTAG)
+
+Når boardet er tilsluttet, vises konsollen som `/dev/ttyACM0`:
+
+```bash
+scripts/monitor.sh                 # standard: /dev/ttyACM0
+scripts/monitor.sh /dev/ttyACM1    # anden port
+```
+
+Scriptet kalder `west espressif monitor` (west-extensionen findes kun inde i
+workspacet, derfor `cd ~/zephyrproject` inde i scriptet). Vent på beskeden
+`Hello World!` og de periodiske `LOG_INF`-linjer.
 
 ## VSCode
 
@@ -58,10 +85,30 @@ screen /dev/ttyUSB0 115200    # eller: picocom /dev/ttyUSB0 -b 115200
 - `Ctrl+Shift+B` → byg
 - "Zephyr: Byg (clean)" og "Zephyr: Flash" under Terminal → Run Task
 
-## Bemærkninger
+## Fejlfinding
 
 - USB-enheder kræver typisk at brugeren er i gruppen `dialout`:
   `sudo usermod -aG dialout $USER` (genstart sessionen bagefter).
+- Ingen `/dev/ttyACM0`? Prøv et andet USB-kabel (kun datakabel uden
+  strøm-funktion virker ikke) eller en anden USB-port.
 - Den første build tager et øjeblik (ESP-IDF-moduler initieres).
-- Pins: USB-CDC via `usb_serial` kan aktiveres med en overlay (eksisterende
-  eksempel: `usb-console.overlay` fra `~/zephyrproject`).
+
+## Konsol
+
+Læs konsoluddata uden DTR/RTS-toggling (vigtigt for ESP32-C6):
+
+```bash
+./scripts/console.sh
+PORT=/dev/ttyACM0 TIMEOUT=30 ./scripts/console.sh
+```
+
+Efter flash kan chippen stå i ROM-downloadmode; hvis der ikke kommer output, tryk
+**RST/EN** på boardet. I VMware skal USB-enheden forbindes via
+*Removable Devices → Connect*. Konsollen forventes på DevKitC'ens **USB**-port,
+ikke UART-porten.
+
+Forventet output:
+```
+Hello World! esp32c6_devkitc/esp32c6/hpcore
+... <inf> zephyr_app: Kører - uptime: ... ms
+```

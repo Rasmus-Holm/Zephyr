@@ -82,14 +82,40 @@ pip install --upgrade pip
 pip install west
 
 # ---- 5. Hent Zephyr-kildekode ----------------------------------------------
-step "Henter Zephyr $ZEPHYR_TAG med west (dette tager nogle minutter)"
+step "Initialiserer west-workspace med Zephyr $ZEPHYR_TAG"
 if [[ ! -d "$WS/.west" ]]; then
     west init "$WS" --mr "$ZEPHYR_TAG"
 else
     echo "    West-workspace findes allerede."
 fi
 cd "$WS"
-west update
+
+# Et fuldt Zephyr-træ er ~15 GB. Vi henter kun de HAL'er projektet kræver:
+# hal_espressif (ESP32 = Projekt A og B) og hal_nordic (nRF = Projekt C).
+# Uden dette fejler store repos som hal_nxp typisk pga. diskplads eller RAM i en VM.
+step "Begrænser workspacet til relevante HAL'er (sparer ~10 GB)"
+west config manifest.project-filter -- '-hal_.*,+hal_espressif,+hal_nordic'
+echo "    Aktivt filter: $(west config manifest.project-filter)"
+
+# Advarsel hvis der er for lidt diskplads tilbage
+AVAIL_GB=$(df -BG --output=avail "$HOME" | tail -1 | tr -dc '0-9')
+echo "    Fri diskplads i \$HOME: ${AVAIL_GB} GB"
+if (( AVAIL_GB < 12 )); then
+    warn "Under 12 GB fri. Zephyr + SDK kræver ca. 10-12 GB."
+    warn "Udvid din VMware-disk, eller frigør plads, før du fortsætter."
+    read -rp "    Fortsæt alligevel? [j/N] " ans
+    [[ "${ans,,}" == "j" ]] || die "Afbrudt. Frigør diskplads og kør scriptet igen."
+fi
+
+step "Henter kildekode (shallow clone — tager nogle minutter)"
+# --narrow + --depth=1 henter kun den relevante commit, ikke hele historikken.
+if ! west update --narrow -o=--depth=1; then
+    warn "west update fejlede. Prøver igen med lempeligere git-indstillinger..."
+    git config --global http.postBuffer 524288000
+    git config --global core.compression 0
+    west update --narrow -o=--depth=1 \
+        || die "west update fejler stadig. Kør 'df -h' og 'free -h' — det er næsten altid diskplads eller RAM."
+fi
 
 step "Eksporterer Zephyr CMake-pakke"
 west zephyr-export
