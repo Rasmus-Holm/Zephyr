@@ -1,0 +1,26 @@
+#ifndef WIFI_TLS_CREDENTIALS_H
+#define WIFI_TLS_CREDENTIALS_H
+
+/* Public CA certificate from the Webdock Mosquitto broker. */
+static const unsigned char ca_certificate[] =
+	"-----BEGIN CERTIFICATE-----\n"
+	"MIIDGTCCAgGgAwIBAgIUcBWuwLq0cNp3BPkFLHatHf18XtswDQYJKoZIhvcNAQEL\n"
+	"BQAwHDEaMBgGA1UEAwwRSUlvVCBQcm9qZWt0IEEgQ0EwHhcNMjYxMDAxMDc0NDMx\n"
+	"WhcNMzYwOTI4MDc0NDMxWjAcMRowGAYDVQQDDBFJSW9UIFByb2pla3QgQSBDQTCC\n"
+	"ASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALC//C47FeCsJovN2mjmbpkm\n"
+	"oca3HMX8lYEXTfEja3pziUEf0Jg2IKNSRPx+n0+p9RRIlf/2EgDHctkS/0MoKAUo\n"
+	"a1jRc3pmwCbs4wEvAxsGY1z07/XhDkgX5D9wk9xaTcX+OtPOypazz/r7oud4cEmd\n"
+	"ejleTJC4+1sVz0bHWYKdFgMhnyhPeSk3c9y5p/bCh6OZPo6lQf3NxW9oSoiR3BL1\n"
+	"nKG8JUTHZkx4X8NR7/Q3e7N4G8B7JGBHXqiZpR8AbVVlWgLwTRFtu6UTO5gpydBM\n"
+	"53twgsPTPM+8r+wUIfhsOe2DMiCuFs7tnTnK+jNABd1ctUIZzxpKlk0ffqIKCBkC\n"
+	"AwEAAaNTMFEwHQYDVR0OBBYEFMUEGHFLuvJydIQJXwmP222s8uYcMB8GA1UdIwQY\n"
+	"MBaAFMUEGHFLuvJydIQJXwmP222s8uYcMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZI\n"
+	"hvcNAQELBQADggEBAJSjpB1ABihyTLrEqIxoT+pWjnxEKn1fO9hkHxHHfDHKFtt9\n"
+	"f2YwQuQKg0B3T53euyHA6vkpFoWRmkyZjxx47juY0wbNJd5Df9124iZPdFcgcPdb\n"
+	"xJjdDHq1DSyamtIF67WTgf4Sk97HC+aKRZ86cwiavYDvcNoKSK/wXHqZrHi7mq+d\n"
+	"pJhslIojbJ20+xAsEYsA72j80FbbtFngb/JjAlqWd1sMVWNTNsgai2DF1FU/9jEU\n"
+	"KRMVHDU9DL0eLrOXQ9i79QdwLKc87UxeGVfWoWWuoNOuTkJ9vLDU8ausWXh/LZPc\n"
+	"9/QAi0bO9uqkDRR7ihnWdW5Je/oeqkDs4mbtZoc=\n"
+	"-----END CERTIFICATE-----\n";
+
+#endif

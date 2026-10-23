@@ -1,0 +1,8 @@
+
+/zephyrproject/
+**/build/
+**/wifi-local.conf
+**/src/pass.hpp
+**/wifi-tls/tools/output/
+**/build-*/
+**/.cache/
