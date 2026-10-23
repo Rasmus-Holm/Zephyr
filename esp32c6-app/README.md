@@ -92,3 +92,23 @@ workspacet, derfor `cd ~/zephyrproject` inde i scriptet). Vent på beskeden
 - Ingen `/dev/ttyACM0`? Prøv et andet USB-kabel (kun datakabel uden
   strøm-funktion virker ikke) eller en anden USB-port.
 - Den første build tager et øjeblik (ESP-IDF-moduler initieres).
+
+## Konsol
+
+Læs konsoluddata uden DTR/RTS-toggling (vigtigt for ESP32-C6):
+
+```bash
+./scripts/console.sh
+PORT=/dev/ttyACM0 TIMEOUT=30 ./scripts/console.sh
+```
+
+Efter flash kan chippen stå i ROM-downloadmode; hvis der ikke kommer output, tryk
+**RST/EN** på boardet. I VMware skal USB-enheden forbindes via
+*Removable Devices → Connect*. Konsollen forventes på DevKitC'ens **USB**-port,
+ikke UART-porten.
+
+Forventet output:
+```
+Hello World! esp32c6_devkitc/esp32c6/hpcore
+... <inf> zephyr_app: Kører - uptime: ... ms
+```

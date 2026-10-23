@@ -37,6 +37,7 @@ cd esp32c6-app
 scripts/build.sh            # incremental
 scripts/build.sh -p         # pristine rebuild
 scripts/flash.sh            # west flash -d build --runner esp32  (esptool)
+scripts/console.sh          # raw read of /dev/ttyACM0, no DTR/RTS (PORT/TIMEOUT env)
 scripts/monitor.sh [port]   # west espressif monitor -p /dev/ttyACM0 -e build/zephyr/zephyr.elf
 ```
 
@@ -57,7 +58,25 @@ scripts/monitor.sh [port]   # west espressif monitor -p /dev/ttyACM0 -e build/ze
 
 - The console is the board's USB Serial/JTAG controller: **`/dev/ttyACM0`**, not
   `/dev/ttyUSB0`. It requires `CONFIG_SERIAL_ESP32_USB=y` in `prj.conf` *and*
-  `app.overlay` selecting `zephyr,console = &usb_serial`.
+  `app.overlay` selecting `zephyr,console = &usb_serial`. The board's *default*
+  console is `uart0`, so both are needed. Verified in the built image: the
+  `serial_esp32_usb` driver and `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` are linked in.
+- Read the console with `scripts/console.sh` (plain `cat`) or the serial-monitor
+  extension. **Never toggle DTR/RTS** from a script: esptool's reset sequences
+  (`USBJTAGSerialReset`, `HardReset(uses_usb=True)`) leave the ESP32-C6 in the ROM
+  downloader, showing `boot:0x4 (DOWNLOAD...)` / `waiting for download` and silence.
+- If there is no output after `scripts/flash.sh`, **press RST/EN once** (or replug
+  USB). The app then boots and prints `Hello World! esp32c6_devkitc/esp32c6/hpcore`
+  followed by `Kører - uptime: … ms` from `zephyr_app` every 5 s. Verifying the app
+  runs: `esptool --before no-reset --after no-reset chip-id` fails with a write
+  timeout when the app (not the ROM downloader) owns the port.
+- Ubuntu here is a VMware guest. After a VM reboot, attach the board via
+  *Removable Devices → Connect*; use the DevKitC's **USB** port (native
+  Serial/JTAG), not the **UART** port (CP210x → `/dev/ttyUSB0`). The board
+  re-enumerates when the app's USB driver starts, so the very first `printk` can be
+  missed if the reader opens too late — the 5 s periodic log confirms liveness.
+- esptool may warn `Set flash_size 8MB is larger than the available flash size of
+  4MB`; harmless (the DevKitC has 4 MB).
 - The user must be in `dialout`/`plugdev`, and a USB **data** cable is required —
   charge-only cables enumerate no device.
 
