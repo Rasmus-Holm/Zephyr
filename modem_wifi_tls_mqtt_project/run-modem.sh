@@ -16,7 +16,7 @@ cd "$ZEPHYR_WS"
 west build -p always -b esp32c6_devkitc/esp32c6/hpcore -S espressif-flash-4M \
   -d "$BUILD_DIR" "$PROJECT" -- \
   -DOVERLAY_CONFIG="$PROJECT/cellular.conf" \
-  -DEXTRA_DTC_OVERLAY_FILE="$PROJECT/modem-uart1.overlay;$PROJECT/usb.overlay"
+  -DEXTRA_DTC_OVERLAY_FILE="$PROJECT/modem-uart1.overlay;$PROJECT/modbus-uart0.overlay;$PROJECT/usb.overlay"
 
 west flash -d "$BUILD_DIR" --esp-baud-rate 460800 --esp-device "$PORT"
 

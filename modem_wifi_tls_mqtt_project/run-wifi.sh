@@ -14,7 +14,8 @@ PORT="$(ls /dev/serial/by-id/usb-Espressif* | head -1)"
 cd "$ZEPHYR_WS"
 
 west build -p always -b esp32c6_devkitc/esp32c6/hpcore -S espressif-flash-4M \
-  -d "$BUILD_DIR" "$PROJECT" -- -DEXTRA_DTC_OVERLAY_FILE="$PROJECT/usb.overlay"
+  -d "$BUILD_DIR" "$PROJECT" -- \
+  -DEXTRA_DTC_OVERLAY_FILE="$PROJECT/modbus-uart0.overlay;$PROJECT/usb.overlay"
 
 west flash -d "$BUILD_DIR" --esp-baud-rate 460800 --esp-device "$PORT"
 

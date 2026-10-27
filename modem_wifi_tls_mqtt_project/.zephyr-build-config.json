@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "values": {
+    "venv": "/home/oliver/.venvs/zephyr-4.4.0",
+    "zephyr_workspace": "/home/oliver/Work/zephyrproject",
+    "board_target": "esp32c6_devkitc/esp32c6/hpcore",
+    "application": "/home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB",
+    "build_directory": "/home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB/build",
+    "overlay": "USB-ONLY",
+    "esp_device": "/dev/ttyACM0",
+    "esp_baud_rate": "115200",
+    "monitor_method": "idf_monitor",
+    "config_file": "NONE"
+  }
+}

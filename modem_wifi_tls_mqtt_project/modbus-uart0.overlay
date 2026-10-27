@@ -1,0 +1,30 @@
+#include <zephyr/dt-bindings/pinctrl/esp-pinctrl-common.h>
+#include <zephyr/dt-bindings/pinctrl/esp32c6-pinctrl.h>
+
+/* Modbus UART0 uses GPIO22/23, separate from the USB bridge and Stamp CatM. */
+&pinctrl {
+	uart0_modbus: uart0_modbus {
+		group1 {
+			pinmux = <UART0_TX_GPIO22>;
+			output-high;
+		};
+
+		group2 {
+			pinmux = <UART0_RX_GPIO23>;
+			bias-pull-up;
+		};
+	};
+};
+
+/* HW-519 switches direction automatically; keep DE control disabled. */
+&uart0 {
+	status = "okay";
+	current-speed = <9600>;
+	pinctrl-0 = <&uart0_modbus>;
+	pinctrl-names = "default";
+
+	modbus0 {
+		compatible = "zephyr,modbus-serial";
+		status = "okay";
+	};
+};

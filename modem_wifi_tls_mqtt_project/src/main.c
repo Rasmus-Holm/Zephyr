@@ -30,6 +30,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "modbus_reader.h"
 #include "tls_credentials.h"
 
 LOG_MODULE_REGISTER(MAIN);
@@ -58,6 +59,8 @@ static bool sta_connected;
 #define MQTT_CONNECT_TIMEOUT_MS 5000
 #define MQTT_CA_CERT_TAG 1
 #define MQTT_SNTP_SERVER CONFIG_MQTT_SNTP_SERVER
+#define MODBUS_EXPECTED_TEST_VALUE 1234
+#define MODBUS_PUBLISH_INTERVAL_MS 10000
 
 static uint8_t mqtt_rx_buffer[MQTT_BUFFER_SIZE];
 static uint8_t mqtt_tx_buffer[MQTT_BUFFER_SIZE];
@@ -107,7 +110,7 @@ static const struct device *const modem_uart = DEVICE_DT_GET(DT_PARENT(DT_ALIAS(
 /* 3GPP 27.010 basic-mode CLD (close multiplexer) on DLCI 0. */
 static const uint8_t cmux_close_frame[] = {0xF9, 0x03, 0xEF, 0x05, 0xC3, 0x01, 0xF2, 0xF9};
 #define CMUX_CLOSE_SETTLE_MS 500
-/* Fixed wait for the modem to restart; the driver opens the UART 11.5 s after boot. */
+/* Fixed wait for the modem to restart; the driver's init script sends its first AT 11.5 s after boot. */
 #define MODEM_RESTART_WAIT_MS 4000
 static struct net_if *ppp_iface;
 K_EVENT_DEFINE(l4_event);
@@ -203,8 +206,8 @@ static void log_modem_facts(void)
 
 /*
  * Close a CMUX session the modem kept from the previous boot, so the driver's AT script is
- * answered. The driver opens the UART only when its init script starts, 11.5 s after boot
- * (1.5 s power pulse and 10 s startup time for the SIM7080), so the UART is free until then.
+ * answered. The driver opens the UART early, but its init script sends the first AT only
+ * 11.5 s after boot (1.5 s power pulse and 10 s startup time for the SIM7080).
  */
 static void modem_close_stale_cmux(void)
 {
@@ -379,14 +382,12 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt
 		if (result == 0)
 		{
 			sta_connected = true;
-			LOG_INF("Wi-Fi %s connected to %s (status=%d)",
-					wifi_iface_name(iface), CONFIG_WIFI_SAMPLE_SSID, result);
+			LOG_INF("Wi-Fi %s connected (status=%d)", wifi_iface_name(iface), result);
 		}
 		else
 		{
 			sta_connected = false;
-			LOG_ERR("Wi-Fi %s connection failed to %s (status=%d)",
-					wifi_iface_name(iface), CONFIG_WIFI_SAMPLE_SSID, result);
+			LOG_ERR("Wi-Fi %s connection failed (status=%d)", wifi_iface_name(iface), result);
 		}
 		break;
 	}
@@ -396,8 +397,7 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt
 		int result = status ? status->status : -ENODATA;
 
 		sta_connected = false;
-		LOG_WRN("Wi-Fi %s disconnected from %s (status=%d)",
-				wifi_iface_name(iface), CONFIG_WIFI_SAMPLE_SSID, result);
+		LOG_WRN("Wi-Fi %s disconnected (status=%d)", wifi_iface_name(iface), result);
 		break;
 	}
 	default:
@@ -440,13 +440,13 @@ static int connect_to_wifi(void)
 	sta_config.channel = WIFI_CHANNEL_ANY;
 	sta_config.band = WIFI_FREQ_BAND_2_4_GHZ;
 
-	LOG_INF("Connecting to SSID: %s\n", sta_config.ssid);
+	LOG_INF("Connecting to configured Wi-Fi network");
 
 	int ret = net_mgmt(NET_REQUEST_WIFI_CONNECT, sta_iface, &sta_config,
 					   sizeof(struct wifi_connect_req_params));
 	if (ret)
 	{
-		LOG_ERR("Unable to Connect to (%s)", CONFIG_WIFI_SAMPLE_SSID);
+		LOG_ERR("Unable to connect to configured Wi-Fi network");
 	}
 
 	return ret;
@@ -725,11 +725,56 @@ static int mqtt_publish_payload(const char *payload)
 	return ret;
 }
 
-int main(void)
+/* Read and validate the RTU values before publishing the slave's uptime. */
+static int mqtt_publish_modbus_uptime(void)
 {
 	char payload[MQTT_BUFFER_SIZE];
-	int num = 0;
+	uint16_t test_value;
+	uint16_t uptime_seconds;
+	int ret;
+
+	ret = modbus_reader_read(&test_value, &uptime_seconds);
+	if (ret < 0)
+	{
+		LOG_ERR("Modbus RTU read failed: %d", ret);
+		return ret;
+	}
+
+	if (test_value != MODBUS_EXPECTED_TEST_VALUE)
+	{
+		LOG_ERR("Modbus validation failed: register 0 = %u", test_value);
+		return -EINVAL;
+	}
+
+	LOG_INF("Modbus sample: register 0 = %u, uptime = %u s", test_value, uptime_seconds);
+	ret = snprintk(payload, sizeof(payload), "payload %u", uptime_seconds);
+	if (ret < 0 || ret >= sizeof(payload))
+	{
+		LOG_ERR("Modbus payload formatting failed: %d", ret);
+		return -EMSGSIZE;
+	}
+
+	return mqtt_publish_payload(payload);
+}
+
+int main(void)
+{
+	int64_t next_modbus_publish_ms = 0;
+	bool modbus_ready = false;
+	int ret;
+
 	k_sleep(K_SECONDS(5));
+
+	ret = modbus_reader_init();
+	if (ret < 0)
+	{
+		LOG_ERR("Modbus client initialization failed: %d; telemetry disabled", ret);
+	}
+	else
+	{
+		modbus_ready = true;
+		LOG_INF("Modbus RTU client ready; sample interval %d ms", MODBUS_PUBLISH_INTERVAL_MS);
+	}
 
 	if (mqtt_tls_init() < 0)
 	{
@@ -751,8 +796,7 @@ int main(void)
 		}
 		else if (synchronize_clock() == 0 && mqtt_publish_setup() == 0)
 		{
-			snprintf(payload, sizeof(payload), "payload %d", num++);
-			mqtt_publish_payload(payload);
+			next_modbus_publish_ms = k_uptime_get();
 		}
 	}
 
@@ -798,14 +842,17 @@ int main(void)
 			if (mqtt_allowed && network_has_ipv4() &&
 			    (clock_synchronized || synchronize_clock() == 0))
 			{
-				mqtt_publish_setup();
+				if (mqtt_publish_setup() == 0)
+				{
+					next_modbus_publish_ms = k_uptime_get();
+				}
 			}
 		}
 
-		if (mqtt_connected)
+		if (mqtt_connected && modbus_ready && k_uptime_get() >= next_modbus_publish_ms)
 		{
-			snprintf(payload, sizeof(payload), "payload %d", num++);
-			mqtt_publish_payload(payload);
+			mqtt_publish_modbus_uptime();
+			next_modbus_publish_ms = k_uptime_get() + MODBUS_PUBLISH_INTERVAL_MS;
 		}
 	}
 }
