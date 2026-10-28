@@ -55,7 +55,7 @@ static bool sta_connected;
 #define MQTT_CA_CERT_TAG 1
 #define MQTT_SNTP_SERVER CONFIG_MQTT_SNTP_SERVER
 #define MODBUS_EXPECTED_TEST_VALUE 1234
-#define MODBUS_PUBLISH_INTERVAL_MS 10000
+#define MODBUS_PUBLISH_INTERVAL_MS 5000
 
 static uint8_t mqtt_rx_buffer[MQTT_BUFFER_SIZE];
 static uint8_t mqtt_tx_buffer[MQTT_BUFFER_SIZE];
