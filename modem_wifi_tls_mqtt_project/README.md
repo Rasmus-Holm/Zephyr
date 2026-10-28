@@ -46,7 +46,7 @@ Den lokale Linux-Mosquitto-route med lokal CA og broker-IP `192.168.87.119` besk
 
 ## 1.4. Lokal konfiguration
 
-Opret eller opdatér `wifi-local.conf` lokalt med projektets faktiske værdier. Filen er git-ignoreret og indlæses automatisk af CMake som `EXTRA_CONF_FILE`:
+Opret eller opdatér `wifi-local.conf` lokalt med projektets faktiske værdier. Filen er git-ignoreret og indlæses af `run-build.sh` via `-DEXTRA_CONF_FILE`; `CMakeLists.txt` indlæser ingen conf-filer:
 
 ```conf
 CONFIG_WIFI_SAMPLE_SSID="..."
@@ -83,33 +83,28 @@ Filer til modem-versionen:
 | `modbus-uart0.overlay` | Modbus RTU på UART0, GPIO22 TX og GPIO23 RX                                    | committet |
 | `usb.overlay`          | USB-konsol, også med i modem-buildet                                           | committet |
 
-Modbus-konfigurationen ligger i fælles `prj.conf` og `modbus-uart0.overlay`. Wi-Fi-buildet indlæser `wifi.conf` og `wifi-local.conf` automatisk samt USB- og Modbus-overlays. Modem-buildet kræver `-DOVERLAY_CONFIG` med `cellular.conf`, indlæser `cellular-local.conf` i stedet for `wifi-local.conf` og tilføjer modem-, Modbus- og USB-overlays. Tre uafhængige scripts tager varianten `wifi` eller `modem` som argument, og spørger i en menu, hvis argumentet mangler i en terminal: `run-build.sh` bygger (build-mappen er `build-wifi` for Wi-Fi og `build-cellular` for modem), `run-flash.sh` flasher det byggede firmware, og `run-monitor.sh` starter serial monitor (afslut med `Ctrl+]`; åbning af porten nulstiller kortet).
+Modbus-konfigurationen ligger i fælles `prj.conf` og `modbus-uart0.overlay`. `CMakeLists.txt` er kun Zephyr-grundstrukturen; alle variantvalg ligger i `run-build.sh`, som sender dem til `west build`. Wi-Fi-buildet får `-DEXTRA_CONF_FILE` med `wifi.conf` og `wifi-local.conf` samt USB- og Modbus-overlays. Modem-buildet får `cellular.conf` og `cellular-local.conf` i stedet samt modem-, Modbus- og USB-overlays. Scriptet stopper før build, hvis en conf-fil mangler. Tre uafhængige scripts tager varianten `wifi` eller `modem` som argument, og spørger i en menu, hvis argumentet mangler i en terminal: `run-build.sh` bygger (build-mappen er `build-wifi` for Wi-Fi og `build-cellular` for modem), `run-flash.sh` flasher det byggede firmware, og `run-monitor.sh` starter serial monitor (afslut med `Ctrl+]`; åbning af porten nulstiller kortet).
 
 ## 1.6. Build
 
-Byg med en lokal `build-wifi/`-mappe i applikationen. Workspace-reglen er, at build-output ikke placeres uden for applikationen:
+Byg med `run-build.sh wifi` eller `run-build.sh modem`. Build-output ligger i `build-wifi/` eller `build-cellular/` i applikationen; workspace-reglen er, at build-output ikke placeres uden for applikationen. Scriptet kører `west build` med disse variantvalg, og en bar `west build` uden dem giver en Wi-Fi-build med `CHANGE_ME`-værdier:
 
 ```bash
-source "$HOME/.venvs/zephyr-4.4.0/bin/activate"
-cd "$HOME/Work/zephyrproject"
 west build -p always -b esp32c6_devkitc/esp32c6/hpcore -S espressif-flash-4M \
-  -d /home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB/build-wifi \
-  /home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB -- \
-  -DEXTRA_DTC_OVERLAY_FILE="/home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB/modbus-uart0.overlay;/home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB/usb.overlay"
+  -d <projekt>/build-wifi <projekt> -- \
+  -DEXTRA_CONF_FILE="<projekt>/wifi.conf;<projekt>/wifi-local.conf" \
+  -DEXTRA_DTC_OVERLAY_FILE="<projekt>/modbus-uart0.overlay;<projekt>/usb.overlay"
 ```
 
 `-S espressif-flash-4M` er nødvendig, fordi boardet har 4 MB flash. Kontrollér den genererede `build-wifi/zephyr/.config` for MQTT TLS og Mbed TLS-symboler.
+
+Verificeret 2026-10-28: `CMakeLists.txt` indlæser ikke længere conf-filer. Begge varianter blev bygget med `run-build.sh`, og den genererede `.config` var identisk med den fra før ændringen. Runtime er ikke kørt efter ændringen.
 
 Senest verificeret 2026-10-27: Wi-Fi-buildet med Modbus/UART0 og USB Serial/JTAG-overlay byggede for 4 MB flash og blev flashet til ESP32-C6FH4. C6 læste register 0 = `1234` og register 1 fra slave-ESP32 over UART0 GPIO22/23 og publicerede 10 uptime-payloads med 10 sekunders interval. En `mosquitto_sub` modtog de samme 10 værdier på `iot/test`. Cellular-varianten blev tilsvarende testet med Stamp CatM på UART1 GPIO18/19 samtidig med Modbus på UART0 GPIO22/23. Sanitized konsol- og subscriberlogs ligger i workspace under `assignment-industriel-iot-projekt/ai-workspace/evidence/modbus-mqtt-integration/`. Resultatet er en syntetisk testdatavej, ikke fuld Project A acceptance.
 
 ### 1.6.1. Build med iot-wrapperen
 
-Wrapperen `iot` spørger om en config-fil og om overlays. Valgene gemmes i `.zephyr-build-config.json`, og `build-fast` bruger dem igen.
-
-- **Config-fil:** `NONE` sender ingen `-DOVERLAY_CONFIG`. CMake vælger så Wi-Fi-mode og indlæser `wifi.conf` og `wifi-local.conf`. Vælg `cellular.conf` til modem-mode. Standardværdien i prompten er den gemte værdi, så skriv `NONE` eksplicit.
-- **Overlays:** `AUTO-USB` og `AUTO-SCRIPT` tager alle `.overlay`-filer i projektmappen, herunder modem-, Modbus- og USB-overlays. Til Wi-Fi skal buildet aktivere `modbus-uart0.overlay` og `usb.overlay`. Til modem er overlay-listen `modem-uart1.overlay;modbus-uart0.overlay;usb.overlay`.
-
-Det er verificeret ved at læse wrapperens kode og ved at køre dens discover-funktioner mod projektmappen. Der er ikke kørt en build med wrapperen i dette afsnit.
+Wrapperen `iot` understøttes ikke længere til dette projekt. Den sender kun `-DOVERLAY_CONFIG`, og `CMakeLists.txt` vælger ikke længere variant, så den giver ikke en komplet build. Brug `run-build.sh`.
 
 ## 1.7. Runtime-gates
 
@@ -129,8 +124,8 @@ Samme firmware kan bygges til modem-varianten. Netværkslaget vælges i `src/mai
 
 Build-forskelle:
 
-- Wi-Fi (standard): `prj.conf`, `wifi.conf` og `wifi-local.conf` indlæses sammen med `modbus-uart0.overlay` og `usb.overlay`.
-- Modem: `-DOVERLAY_CONFIG=<projekt>/cellular.conf` og `-DEXTRA_DTC_OVERLAY_FILE="<projekt>/modem-uart1.overlay;<projekt>/modbus-uart0.overlay;<projekt>/usb.overlay"`. `wifi.conf` og `wifi-local.conf` indlæses ikke, så Wi-Fi-credentials ikke kommer med i modem-buildet.
+- Wi-Fi: `-DEXTRA_CONF_FILE="<projekt>/wifi.conf;<projekt>/wifi-local.conf"` og `-DEXTRA_DTC_OVERLAY_FILE="<projekt>/modbus-uart0.overlay;<projekt>/usb.overlay"`, ud over `prj.conf`.
+- Modem: `-DEXTRA_CONF_FILE="<projekt>/cellular.conf;<projekt>/cellular-local.conf"` og `-DEXTRA_DTC_OVERLAY_FILE="<projekt>/modem-uart1.overlay;<projekt>/modbus-uart0.overlay;<projekt>/usb.overlay"`. `wifi.conf` og `wifi-local.conf` indlæses ikke, så Wi-Fi-credentials ikke kommer med i modem-buildet.
 
 Den committede fil `cellular-local.conf` indeholder kun `CONFIG_MQTT_BROKER_ADDRESS`, `CONFIG_MQTT_CLIENT_ID` og `CONFIG_MQTT_TOPIC`. SSID og PSK står ikke i den.
 

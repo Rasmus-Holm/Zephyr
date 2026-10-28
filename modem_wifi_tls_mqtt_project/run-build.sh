@@ -16,16 +16,16 @@ if [[ -z "$VARIANT" && -t 0 ]]; then
   done
 fi
 
-# Vælg build-mappe, Kconfig-overlay og DT-overlays efter variant
+# Vælg build-mappe, Kconfig-filer og DT-overlays efter variant (prj.conf indlæses altid af Zephyr)
 case "$VARIANT" in
   wifi)
     BUILD_DIR="$PROJECT/build-wifi"
-    OVERLAY_CONFIG=""
+    CONF_FILES="$PROJECT/wifi.conf;$PROJECT/wifi-local.conf"
     DTC_OVERLAYS="$PROJECT/modbus-uart0.overlay;$PROJECT/usb.overlay"
     ;;
   modem)
     BUILD_DIR="$PROJECT/build-cellular"
-    OVERLAY_CONFIG="$PROJECT/cellular.conf"
+    CONF_FILES="$PROJECT/cellular.conf;$PROJECT/cellular-local.conf"
     DTC_OVERLAYS="$PROJECT/modem-uart1.overlay;$PROJECT/modbus-uart0.overlay;$PROJECT/usb.overlay"
     ;;
   *)
@@ -34,14 +34,19 @@ case "$VARIANT" in
     ;;
 esac
 
+# Stop før build, hvis en conf-fil mangler, så kortet ikke får CHANGE_ME-standardværdier
+IFS=';' read -ra CONF_LIST <<< "$CONF_FILES"
+for conf in "${CONF_LIST[@]}"; do
+  if [[ ! -f "$conf" ]]; then
+    echo "Mangler $conf; opret den (se README, Lokal konfiguration)." >&2
+    exit 1
+  fi
+done
+
 # shellcheck source=/dev/null
 source "$HOME/.venvs/zephyr-4.4.0/bin/activate"
 cd "$ZEPHYR_WS"
 
-CMAKE_ARGS=("-DEXTRA_DTC_OVERLAY_FILE=$DTC_OVERLAYS")
-if [[ -n "$OVERLAY_CONFIG" ]]; then
-  CMAKE_ARGS+=("-DOVERLAY_CONFIG=$OVERLAY_CONFIG")
-fi
-
 west build -p always -b esp32c6_devkitc/esp32c6/hpcore -S espressif-flash-4M \
-  -d "$BUILD_DIR" "$PROJECT" -- "${CMAKE_ARGS[@]}"
+  -d "$BUILD_DIR" "$PROJECT" -- \
+  "-DEXTRA_CONF_FILE=$CONF_FILES" "-DEXTRA_DTC_OVERLAY_FILE=$DTC_OVERLAYS"
