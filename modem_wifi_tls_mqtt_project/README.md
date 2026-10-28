@@ -62,7 +62,7 @@ Firmware bruger disse værdier direkte via Zephyr Kconfig. `CONFIG_MQTT_BROKER_A
 
 Wi-Fi- og modem-versionen bruger samme kildekode og værktøjer. De adskiller sig kun i konfiguration, overlays og de lokale filer med værdier, der ikke må committes.
 
-Skal med i git: `src/`, `Kconfig`, `CMakeLists.txt`, `prj.conf`, `README.md` og projektets scripts. Skal ikke med i git: `wifi-local.conf`, fordi den indeholder SSID og adgangskode, samt `build/` og `build-cellular/`, fordi det er genereret output. `cellular-local.conf` er committet med vilje, fordi den kun indeholder broker-adresse, klient-ID og topic og ingen credentials. Kom aldrig SSID, PSK, passwords eller nøgler i den.
+Skal med i git: `src/`, `Kconfig`, `CMakeLists.txt`, `prj.conf`, `README.md` og projektets scripts. Skal ikke med i git: `wifi-local.conf`, fordi den indeholder SSID og adgangskode, samt `build-wifi/` og `build-cellular/`, fordi det er genereret output. `cellular-local.conf` er committet med vilje, fordi den kun indeholder broker-adresse, klient-ID og topic og ingen credentials. Kom aldrig SSID, PSK, passwords eller nøgler i den.
 
 Filer til Wi-Fi-versionen:
 
@@ -83,22 +83,22 @@ Filer til modem-versionen:
 | `modbus-uart0.overlay` | Modbus RTU på UART0, GPIO22 TX og GPIO23 RX                                    | committet |
 | `usb.overlay`          | USB-konsol, også med i modem-buildet                                           | committet |
 
-Modbus-konfigurationen ligger i fælles `prj.conf` og `modbus-uart0.overlay`. Wi-Fi-buildet indlæser `wifi.conf` og `wifi-local.conf` automatisk samt USB- og Modbus-overlays. Modem-buildet kræver `-DOVERLAY_CONFIG` med `cellular.conf`, indlæser `cellular-local.conf` i stedet for `wifi-local.conf` og tilføjer modem-, Modbus- og USB-overlays. Scripts `run-wifi.sh` og `run-modem.sh` bruger de rigtige filer for hver version.
+Modbus-konfigurationen ligger i fælles `prj.conf` og `modbus-uart0.overlay`. Wi-Fi-buildet indlæser `wifi.conf` og `wifi-local.conf` automatisk samt USB- og Modbus-overlays. Modem-buildet kræver `-DOVERLAY_CONFIG` med `cellular.conf`, indlæser `cellular-local.conf` i stedet for `wifi-local.conf` og tilføjer modem-, Modbus- og USB-overlays. Tre uafhængige scripts tager varianten `wifi` eller `modem` som argument, og spørger i en menu, hvis argumentet mangler i en terminal: `run-build.sh` bygger (build-mappen er `build-wifi` for Wi-Fi og `build-cellular` for modem), `run-flash.sh` flasher det byggede firmware, og `run-monitor.sh` starter serial monitor (afslut med `Ctrl+]`; åbning af porten nulstiller kortet).
 
 ## 1.6. Build
 
-Byg med en lokal `build/`-mappe i applikationen. Workspace-reglen er, at build-output ikke placeres uden for applikationen:
+Byg med en lokal `build-wifi/`-mappe i applikationen. Workspace-reglen er, at build-output ikke placeres uden for applikationen:
 
 ```bash
 source "$HOME/.venvs/zephyr-4.4.0/bin/activate"
 cd "$HOME/Work/zephyrproject"
 west build -p always -b esp32c6_devkitc/esp32c6/hpcore -S espressif-flash-4M \
-  -d /home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB/build \
+  -d /home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB/build-wifi \
   /home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB -- \
   -DEXTRA_DTC_OVERLAY_FILE="/home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB/modbus-uart0.overlay;/home/oliver/code/zephyr-projects/_iot-project-tests/wifi-tls-no-sparkplugB/usb.overlay"
 ```
 
-`-S espressif-flash-4M` er nødvendig, fordi boardet har 4 MB flash. Kontrollér den genererede `build/zephyr/.config` for MQTT TLS og Mbed TLS-symboler.
+`-S espressif-flash-4M` er nødvendig, fordi boardet har 4 MB flash. Kontrollér den genererede `build-wifi/zephyr/.config` for MQTT TLS og Mbed TLS-symboler.
 
 Senest verificeret 2026-10-27: Wi-Fi-buildet med Modbus/UART0 og USB Serial/JTAG-overlay byggede for 4 MB flash og blev flashet til ESP32-C6FH4. C6 læste register 0 = `1234` og register 1 fra slave-ESP32 over UART0 GPIO22/23 og publicerede 10 uptime-payloads med 10 sekunders interval. En `mosquitto_sub` modtog de samme 10 værdier på `iot/test`. Cellular-varianten blev tilsvarende testet med Stamp CatM på UART1 GPIO18/19 samtidig med Modbus på UART0 GPIO22/23. Sanitized konsol- og subscriberlogs ligger i workspace under `assignment-industriel-iot-projekt/ai-workspace/evidence/modbus-mqtt-integration/`. Resultatet er en syntetisk testdatavej, ikke fuld Project A acceptance.
 
