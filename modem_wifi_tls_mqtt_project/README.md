@@ -178,3 +178,44 @@ Fordi et forkert ur nu stopper TLS, forsøger hovedløkken at sætte uret igen, 
 - Keepalive er aktiv via Zephyrs default `CONFIG_MQTT_KEEPALIVE=60`, og `main.c` kalder `mqtt_live()`, når `poll` timer ud. Gate 7 mangler stadig en observation af PINGREQ/PINGRESP og reconnect mod brokeren.
 - QoS 0-publish giver kun lokal accept. Broker-levering skal ses i en subscriber.
 - Runbooken for Wi-Fi/TLS-routen ligger i workspace (`wifi-tls-reproduction-runbook_linux.md`), og ikke i projektmappen.
+
+
+## Modbus RTU - Master/Slave med DS18B20 (branch: modbus-kommunikation)
+
+### Overblik
+Der er tilføjet Modbus RTU kommunikation mellem ESP32-C6 master og ESP32-WROOM slave med DS18B20 temperaturføler.
+
+### Master (ESP32-C6 DevKitC, `modem_wifi_tls_mqtt_project/`)
+- **Transport:** Modbus RTU client på UART0
+- **Pins:** GPIO22 (TX), GPIO23 (RX)
+- **Transceiver:** HW-519 auto-direction RS485
+- **Indstillinger:** 9600 8N1, Slave ID 1
+- **Polling:** Hver 10 sekunder mod holding registers 0 og 1
+- **Log:** Viser `Temperatur fra slave: X.Y °C (reg0=..., uptime=... s)` når `reg0 <= 10000`
+- **Filer:** `src/main.c`, `src/modbus_reader.c/h`, `modbus-uart0.overlay`
+
+### Slave (ESP32-WROOM DevKitC, `modbus-rtu-slave/`)
+- **Transport:** Modbus RTU server på UART2
+- **Pins:** GPIO16 (RX), GPIO17 (TX)
+- **Transceiver:** HW-519 auto-direction RS485
+- **Sensor:** DS18B20 på GPIO4 via `zephyr,w1-gpio` (4.7k pull-up)
+- **Unit ID:** 1
+- **Registermap:**
+  - Register 0: Temperatur i °C * 10 (int16)
+  - Register 1: Uptime LSW i sekunder
+- **Filer:** `modbus-rtu-slave/src/main.c`, `modbus-rtu-slave/src/modbus_server.c`, `modbus-rtu-slave/src/sensors.c`, `modbus-rtu-slave/app.overlay`, `modbus-rtu-slave/prj.conf`
+
+### Wiring (RS485)
+- **Kabel:** A-A, B-B mellem de to HW-519 moduler
+- **Fælles GND:** Forbind GND mellem master- og slave-board
+- **Terminering:** 120Ω modstand mellem A og B på **én** ende (ved vores test blev den sat på slave-enden)
+- **UART til HW-519:** Skal matches korrekt mellem ESP og transceiver (se fejlfindingsnoter i projektlog)
+
+### Test
+1. Flash slave til ESP32-WROOM (`modbus-rtu-slave/`) og tjek log på `/dev/ttyUSB0` for temperatur
+2. Flash master til ESP32-C6 med samme wiring og tjek log på `/dev/ttyACM0` for `Temperatur fra slave: ...`
+3. Med korrekt wiring + terminering skal både slave og master vise trafik på deres serielle terminaler
+
+### Noter
+- Grundet auto-direction timing på billige HW-519 moduler kan retursvaret nogle gange være svært at få igennem. 120Ω terminering på én ende hjalp i vores test.
+- Alternativt kan man gå til Modbus TCP over WiFi for at undgå RS485-auto-direction helt.
