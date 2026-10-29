@@ -52,7 +52,7 @@ config NETWORK_CELLULAR
 	bool "Use the Stamp CatM modem (PPP) instead of Wi-Fi"
 	default n
 	help
-	  Selects the modem network layer in src/main.c with #if. Wi-Fi remains the default.
+	  Selects the modem network layer (src/network_modem.c) in CMakeLists.txt instead of Wi-Fi (src/network_wifi.c). Wi-Fi remains the default.
 
 config NETWORK_IPV4_TIMEOUT_SECONDS
 	int "Seconds to wait for an IPv4 address"
