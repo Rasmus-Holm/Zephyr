@@ -32,6 +32,7 @@
 
 #include "modbus_reader.h"
 #include "tls_credentials.h"
+#include <stdlib.h>
 
 LOG_MODULE_REGISTER(MAIN);
 
@@ -59,7 +60,7 @@ static bool sta_connected;
 #define MQTT_CONNECT_TIMEOUT_MS 5000
 #define MQTT_CA_CERT_TAG 1
 #define MQTT_SNTP_SERVER CONFIG_MQTT_SNTP_SERVER
-#define MODBUS_EXPECTED_TEST_VALUE 1234
+/* MODBUS_EXPECTED_TEST_VALUE removed for temperature test */
 #define MODBUS_PUBLISH_INTERVAL_MS 10000
 
 static uint8_t mqtt_rx_buffer[MQTT_BUFFER_SIZE];
@@ -740,13 +741,14 @@ static int mqtt_publish_modbus_uptime(void)
 		return ret;
 	}
 
-	if (test_value != MODBUS_EXPECTED_TEST_VALUE)
-	{
-		LOG_ERR("Modbus validation failed: register 0 = %u", test_value);
-		return -EINVAL;
+	/* Temperature test: display temperature from slave (reg0 = °C * 10) */
+	if (test_value <= 10000) {
+		int16_t temp_c_x10 = (int16_t)test_value;
+		LOG_INF("Temperatur fra slave: %d.%d °C (reg0=%u, uptime=%u s)",
+			temp_c_x10 / 10, abs(temp_c_x10) % 10, test_value, uptime_seconds);
+	} else {
+		LOG_INF("Modbus sample: register 0 = %u, uptime = %u s", test_value, uptime_seconds);
 	}
-
-	LOG_INF("Modbus sample: register 0 = %u, uptime = %u s", test_value, uptime_seconds);
 	ret = snprintk(payload, sizeof(payload), "payload %u", uptime_seconds);
 	if (ret < 0 || ret >= sizeof(payload))
 	{
@@ -779,7 +781,7 @@ int main(void)
 	if (mqtt_tls_init() < 0)
 	{
 		LOG_ERR("TLS initialization failed");
-		return 0;
+		/* Continue for Modbus test even if TLS fails */
 	}
 
 	if (network_start() < 0)
@@ -798,6 +800,10 @@ int main(void)
 		{
 			next_modbus_publish_ms = k_uptime_get();
 		}
+	}
+
+	if (modbus_ready && next_modbus_publish_ms == 0) {
+		next_modbus_publish_ms = k_uptime_get();
 	}
 
 	while (true)
@@ -846,12 +852,29 @@ int main(void)
 				{
 					next_modbus_publish_ms = k_uptime_get();
 				}
+			} else if (modbus_ready && next_modbus_publish_ms == 0) {
+				next_modbus_publish_ms = k_uptime_get();
 			}
 		}
 
-		if (mqtt_connected && modbus_ready && k_uptime_get() >= next_modbus_publish_ms)
+		if (modbus_ready && k_uptime_get() >= next_modbus_publish_ms)
 		{
-			mqtt_publish_modbus_uptime();
+			if (mqtt_connected) {
+				mqtt_publish_modbus_uptime();
+			} else {
+				uint16_t test_value, uptime_seconds;
+				if (modbus_reader_read(&test_value, &uptime_seconds) == 0) {
+					if (test_value <= 10000) {
+						int16_t temp_c_x10 = (int16_t)test_value;
+						LOG_INF("Temperatur fra slave: %d.%d °C (reg0=%u, uptime=%u s)",
+							temp_c_x10 / 10, abs(temp_c_x10) % 10, test_value, uptime_seconds);
+					} else {
+						LOG_INF("Modbus sample: register 0 = %u, uptime = %u s", test_value, uptime_seconds);
+					}
+				} else {
+					LOG_ERR("Modbus RTU read failed");
+				}
+			}
 			next_modbus_publish_ms = k_uptime_get() + MODBUS_PUBLISH_INTERVAL_MS;
 		}
 	}
