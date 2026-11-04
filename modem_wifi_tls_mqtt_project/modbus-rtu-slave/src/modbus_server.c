@@ -16,6 +16,9 @@ static int holding_reg_rd(uint16_t addr, uint16_t *reg)
 
 	LOG_INF("HOLDING_RD called: addr=%u", addr);
 
+	/* Give master HW-519 time to switch from TX to RX */
+	k_sleep(K_MSEC(20));
+
 	switch (addr) {
 	case 0:
 		/* Temperature in °C * 10 */

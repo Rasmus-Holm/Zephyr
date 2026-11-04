@@ -856,6 +856,7 @@ int main(void)
 				next_modbus_publish_ms = k_uptime_get();
 			}
 		}
+		k_sleep(K_SECONDS(1));
 
 		if (modbus_ready && k_uptime_get() >= next_modbus_publish_ms)
 		{
