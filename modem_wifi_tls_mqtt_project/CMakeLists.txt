@@ -17,5 +17,6 @@ target_sources(app PRIVATE
 	src/sparkplug_node.c
 	src/sparkplug_payload.c
 )
+target_sources_ifdef(CONFIG_APP_PPK_MARKERS app PRIVATE src/ppk_markers.c)
 target_sources_ifdef(CONFIG_NETWORK_CELLULAR app PRIVATE src/network_modem.c)
 target_sources_ifndef(CONFIG_NETWORK_CELLULAR app PRIVATE src/network_wifi.c)

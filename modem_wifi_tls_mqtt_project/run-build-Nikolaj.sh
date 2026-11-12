@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # _Formål: Byg wifi-tls-no-sparkplugB for én variant (wifi eller modem); flasher og rører ikke hardware.
-# Input: variant som første argument, wifi eller modem; uden argument vælges den i en menu.
+# Input: variant som første argument, wifi eller modem (eller en strømmålings-variant, se case); uden argument vælges den i en menu.
 # Output: build-mappen for varianten (build-wifi for wifi, build-cellular for modem).
 set -euo pipefail
 
 PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+POWER="$PROJECT/power"
 ZEPHYR_WS="$HOME/zephyrproject"
 
 VARIANT="${1:-}"
 # Uden argument spørges der i en terminal; uden terminal stopper scriptet
 if [[ -z "$VARIANT" && -t 0 ]]; then
   PS3="Vælg variant: "
-  select VARIANT in wifi modem; do
+  select VARIANT in wifi modem wifi-1 wifi-2a wifi-2b wifi-2c modem-1 modem-2a modem-2d; do
     [[ -n "$VARIANT" ]] && break
   done
 fi
@@ -28,8 +29,31 @@ case "$VARIANT" in
     CONF_FILES="$PROJECT/cellular.conf;$PROJECT/cellular-local.conf"
     DTC_OVERLAYS="$PROJECT/modem-uart1.overlay;$PROJECT/modbus-uart0.overlay;$PROJECT/usb.overlay"
     ;;
+  # Strømmålinger (Testplan_stroemforbrug_PPK2): conf-filerne i power/ lægges oven i hinanden.
+  # -1 = baseline med PPK2-markører; 2a-2d = test 2-trinnene; uden USB-konsol fra 2a.
+  wifi-1|wifi-2a|wifi-2b|wifi-2c)
+    BUILD_DIR="$PROJECT/build-$VARIANT"
+    CONF_FILES="$PROJECT/wifi.conf;$PROJECT/wifi-local.conf;$POWER/ppk.conf"
+    DTC_OVERLAYS="$PROJECT/modbus-uart0.overlay"
+    case "$VARIANT" in
+      wifi-1)  DTC_OVERLAYS="$DTC_OVERLAYS;$PROJECT/usb.overlay" ;;
+      wifi-2a) CONF_FILES="$CONF_FILES;$POWER/2a-lowpower.conf" ;;
+      wifi-2b) CONF_FILES="$CONF_FILES;$POWER/2a-lowpower.conf;$POWER/2b-wifi-ps.conf" ;;
+      wifi-2c) CONF_FILES="$CONF_FILES;$POWER/2a-lowpower.conf;$POWER/2b-wifi-ps.conf;$POWER/2c-pm.conf" ;;
+    esac
+    ;;
+  modem-1|modem-2a|modem-2d)
+    BUILD_DIR="$PROJECT/build-$VARIANT"
+    CONF_FILES="$PROJECT/cellular.conf;$PROJECT/cellular-local.conf;$POWER/ppk.conf"
+    DTC_OVERLAYS="$PROJECT/modem-uart1.overlay;$PROJECT/modbus-uart0.overlay"
+    case "$VARIANT" in
+      modem-1)  DTC_OVERLAYS="$DTC_OVERLAYS;$PROJECT/usb.overlay" ;;
+      modem-2a) CONF_FILES="$CONF_FILES;$POWER/2a-lowpower.conf;$POWER/2a-lowpower-modem.conf" ;;
+      modem-2d) CONF_FILES="$CONF_FILES;$POWER/2a-lowpower.conf;$POWER/2a-lowpower-modem.conf;$POWER/2d-modem-psm.conf" ;;
+    esac
+    ;;
   *)
-    echo "Brug: $0 [wifi|modem]" >&2
+    echo "Brug: $0 [wifi|modem|wifi-1|wifi-2a|wifi-2b|wifi-2c|modem-1|modem-2a|modem-2d]" >&2
     exit 1
     ;;
 esac

@@ -3,6 +3,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/modbus/modbus.h>
+#include <zephyr/pm/policy.h>
 
 #include "modbus_reader.h"
 
@@ -52,8 +53,11 @@ int modbus_reader_read(uint16_t *test_value, uint16_t *uptime_seconds)
 		return -EINVAL;
 	}
 
+	/* No light sleep while waiting for the reply, or UART0 can lose it (CONFIG_PM). */
+	pm_policy_state_lock_get(PM_STATE_STANDBY, PM_ALL_SUBSTATES);
 	err = modbus_read_holding_regs(client_iface, SLAVE_ID, FIRST_REGISTER, registers,
 					       REGISTER_COUNT);
+	pm_policy_state_lock_put(PM_STATE_STANDBY, PM_ALL_SUBSTATES);
 	if (err != 0)
 	{
 		return err;

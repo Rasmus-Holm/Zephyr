@@ -9,6 +9,7 @@
   - [1.2. Formål og scope](#12-formål-og-scope)
   - [1.3. Pipeline](#13-pipeline)
     - [1.3.1. Sparkplug B](#131-sparkplug-b)
+    - [1.3.2. Strømmålinger med PPK2 (test 2)](#132-strømmålinger-med-ppk2-test-2)
   - [1.4. Lokal konfiguration](#14-lokal-konfiguration)
   - [1.5. Filer til hver version](#15-filer-til-hver-version)
   - [1.6. Build](#16-build)
@@ -82,6 +83,30 @@ Verificeret 2026-11-12: Begge varianter bygger uden advarsler mod Zephyr `main` 
 Firmwaren forbinder til brokeren i den adresse, der står i `CONFIG_MQTT_BROKER_ADDRESS`. Den offentlige CA i `src/tls_credentials.h` er identisk med CA'en i `wifi-tls-with-sparkplugB`, og den aktive konfiguration i `wifi-local.conf` peger på Webdock-brokeren `92.113.144.124`.
 
 Den lokale Linux-Mosquitto-route med lokal CA og broker-IP `192.168.87.119` beskrives i runbooken `wifi-tls-reproduction-runbook_linux.md` i workspace (`assignment-industriel-iot-projekt/ai-workspace/notes/technical/`). Den route passer ikke til den CA, som ligger i firmwaren, så de to routes skal ikke blandes sammen.
+
+### 1.3.2. Strømmålinger med PPK2 (test 2)
+
+Trinene fra test 2 i `Testplan_stroemforbrug_PPK2.docx` slås til med conf-filerne i `power/`, som `run-build*.sh` lægger oven i hinanden. Samme kode giver derfor både baseline og alle trin:
+
+| Variant    | Indhold                                                           | Conf-filer oven i wifi/modem               |
+| ---------- | ----------------------------------------------------------------- | ------------------------------------------ |
+| `wifi-1`   | Baseline (test 1) med PPK2-markører og USB-konsol                 | `ppk.conf`                                 |
+| `wifi-2a`  | Logging, konsol, printk og boot-banner fra; uden `usb.overlay`    | + `2a-lowpower.conf`                       |
+| `wifi-2b`  | Wi-Fi power save (`WIFI_PS_MAX_MODEM`, listen interval 3)         | + `2b-wifi-ps.conf`                        |
+| `wifi-2c`  | Poll indtil næste måling (maks. 10 s) og `CONFIG_PM` light sleep  | + `2c-pm.conf`                             |
+| `modem-1`  | Baseline for modem med AT-shell til at tjekke PSM manuelt         | `ppk.conf`                                 |
+| `modem-2a` | Som 2a, plus shell og AT-shell fra                                | + `2a-lowpower.conf`, `2a-lowpower-modem.conf` |
+| `modem-2d` | `AT+CPSMS` og `AT+CEDRXS` sendes efter modem-reset               | + `2d-modem-psm.conf`                      |
+
+Byg med fx `./run-build-Rasmus.sh wifi-2b` og flash med `./run-flash-Rasmus.sh wifi-2b`; build-mappen hedder `build-<variant>`.
+
+- `ppk.conf` slår GPIO-markørerne til og sætter `CONFIG_SPARKPLUG_BATCH_SIZE=1` og 10 s interval, så der kommer én DDATA pr. Modbus-måling (30 pr. 5 min) som i testplanen. Batching hører til test 3.
+- Markører: GPIO2 → PPK2 D0 er høj under Modbus-læsningen, GPIO3 → D1 under hver MQTT-publish (første puls er NBIRTH). En 1 s puls på D1 efter IPv4 betyder, at power save ikke kunne slås til.
+- Med `CONFIG_PM` blokeres light sleep, mens et Modbus-svar ventes, så UART0 ikke mister det.
+- 2d: Modemets svar kan ikke læses før driveren starter. Tjek med `at AT+CPSMS?` og `at AT+CEDRXS?` i en `modem-1`-build, hvilke timere netværket giver.
+- Beskederne er nu Sparkplug B (binære). Tæl dem med `mosquitto_sub ... -t 'spBv1.0/gruppe_4/DDATA/c6-01/#' -F '%I %t %l'`. Node-RED skal publicere STATE online for `red_01`, ellers sendes der intet.
+
+Verificeret 2026-11-12: Alle syv varianter bygger mod Zephyr `main` 1cacc749, og `.config` viser de forventede valg pr. trin. Wi-Fi-varianterne blev bygget uden Espressifs Wi-Fi-blobs (de mangler på build-PC'en), så ESP32-Wi-Fi-driveren var ikke linket ind; power save-kaldet går gennem Zephyrs generiske `NET_REQUEST_WIFI_PS`, som driveren implementerer (`esp32_wifi_set_power_save`). Ikke kørt på hardware.
 
 ## 1.4. Lokal konfiguration
 

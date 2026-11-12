@@ -3,6 +3,7 @@
  */
 
 #include "mqtt_transport.h"
+#include "ppk_markers.h"
 #include "tls_credentials.h"
 
 #include <zephyr/kernel.h>
@@ -393,7 +394,9 @@ int mqtt_transport_publish(const char *topic, const uint8_t *payload, size_t len
 	/* QoS 0 has no packet identifier. */
 	publish_param.message_id = 0;
 
+	ppk_mark_publish(true);
 	ret = mqtt_publish(&mqtt_client, &publish_param);
+	ppk_mark_publish(false);
 	if (ret < 0)
 	{
 		LOG_ERR("MQTT publish to %s failed: %d", topic, ret);

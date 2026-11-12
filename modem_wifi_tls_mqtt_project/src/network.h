@@ -41,4 +41,14 @@ bool network_has_ipv4(void);
  */
 void network_log_status(void);
 
+/**
+ * @brief Enable the link's power save mode (Wi-Fi: CONFIG_APP_WIFI_POWER_SAVE).
+ *
+ * Call after network_wait_ipv4() has succeeded.
+ *
+ * @return 0 on success or when not enabled in Kconfig, negative errno on failure
+ *         (-ENOTSUP if the driver does not support it).
+ */
+int network_enable_power_save(void);
+
 #endif /* NETWORK_H_ */

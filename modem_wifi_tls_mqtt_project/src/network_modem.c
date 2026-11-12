@@ -179,6 +179,27 @@ static void modem_reset_module(void)
 	k_msleep(MODEM_RESTART_WAIT_MS);
 }
 
+#if defined(CONFIG_APP_MODEM_PSM)
+/* Gap between the PSM commands; the replies cannot be read here (see modem_reset_module). */
+#define MODEM_AT_GAP_MS 300
+
+/*
+ * Request PSM and eDRX before the driver starts (test step 2d). The network decides which
+ * timers are granted; check them with AT+CPSMS? and AT+CEDRXS? in the AT shell.
+ */
+static void modem_request_power_saving(void)
+{
+	LOG_INF("Requesting PSM (TAU %s, active %s) and eDRX %s", CONFIG_APP_MODEM_PSM_TAU,
+		CONFIG_APP_MODEM_PSM_ACTIVE_TIME, CONFIG_APP_MODEM_EDRX);
+	modem_send_at("AT+CPSMS=1,,,\"" CONFIG_APP_MODEM_PSM_TAU "\",\""
+		      CONFIG_APP_MODEM_PSM_ACTIVE_TIME "\"");
+	k_msleep(MODEM_AT_GAP_MS);
+	/* 4 = LTE-M (E-UTRAN WB-S1). */
+	modem_send_at("AT+CEDRXS=1,4,\"" CONFIG_APP_MODEM_EDRX "\"");
+	k_msleep(MODEM_AT_GAP_MS);
+}
+#endif
+
 /* Power the modem and bring the PPP interface up. */
 int network_start(void)
 {
@@ -186,6 +207,9 @@ int network_start(void)
 
 	modem_close_stale_cmux();
 	modem_reset_module();
+#if defined(CONFIG_APP_MODEM_PSM)
+	modem_request_power_saving();
+#endif
 
 	ppp_iface = net_if_get_first_by_type(&NET_L2_GET_NAME(PPP));
 	if (!ppp_iface)
@@ -244,6 +268,12 @@ int network_wait_ipv4(int timeout_seconds)
 void network_log_status(void)
 {
 	LOG_INF("PPP status: %s", network_has_ipv4() ? "IP assigned" : "no IP");
+}
+
+/* The modem's power saving is PSM/eDRX, requested in network_start(). */
+int network_enable_power_save(void)
+{
+	return 0;
 }
 
 /* Open a plain TCP connection to the broker to prove the link before TLS. */

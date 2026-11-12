@@ -156,6 +156,34 @@ int network_start(void)
 	return 0;
 }
 
+int network_enable_power_save(void)
+{
+#if defined(CONFIG_APP_WIFI_POWER_SAVE)
+	struct wifi_ps_params params = {
+		.enabled = WIFI_PS_ENABLED,
+		.type = WIFI_PS_PARAM_STATE,
+		/* The ESP32 driver writes this into the station config; 0 means its default 3. */
+		.listen_interval = CONFIG_APP_WIFI_PS_LISTEN_INTERVAL,
+	};
+	int ret;
+
+	if (!sta_iface)
+	{
+		return -ENODEV;
+	}
+
+	ret = net_mgmt(NET_REQUEST_WIFI_PS, sta_iface, &params, sizeof(params));
+	if (ret < 0)
+	{
+		LOG_ERR("Wi-Fi power save failed: %d (fail reason %d)", ret, params.fail_reason);
+		return ret;
+	}
+
+	LOG_INF("Wi-Fi power save enabled, listen interval %d", CONFIG_APP_WIFI_PS_LISTEN_INTERVAL);
+#endif
+	return 0;
+}
+
 /* True when the station is connected and has an IPv4 address. */
 bool network_has_ipv4(void)
 {

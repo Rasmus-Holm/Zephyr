@@ -106,4 +106,81 @@ config NETWORK_IPV4_TIMEOUT_SECONDS
 	int "Seconds to wait for an IPv4 address"
 	default 30
 
+menu "Power measurements (Testplan_stroemforbrug_PPK2, test 2)"
+
+config APP_PPK_MARKERS
+	bool "GPIO markers for the PPK2 logic inputs"
+	select GPIO
+	help
+	  D0 is high during a Modbus read and D1 during an MQTT publish, so the
+	  events can be seen under the current curve without a console (section 2.3).
+
+config APP_PPK_MARKER_MODBUS_PIN
+	int "GPIO for the Modbus marker (PPK2 D0)"
+	depends on APP_PPK_MARKERS
+	default 2
+	help
+	  Avoid GPIO8/9/15 (strapping/LED), 12/13 (USB), 18/19 (modem), 22/23 (Modbus).
+
+config APP_PPK_MARKER_PUBLISH_PIN
+	int "GPIO for the publish marker (PPK2 D1)"
+	depends on APP_PPK_MARKERS
+	default 3
+
+config APP_WIFI_POWER_SAVE
+	bool "Wi-Fi power save after the IPv4 address (step 2b)"
+	depends on !NETWORK_CELLULAR
+	help
+	  Asks the driver for power save (ESP32: WIFI_PS_MAX_MODEM), so the radio
+	  sleeps between the access point's beacons. A failure is logged and shown
+	  as a 1 s pulse on PPK2 D1.
+
+config APP_WIFI_PS_LISTEN_INTERVAL
+	int "Beacon intervals between wake-ups in power save"
+	depends on APP_WIFI_POWER_SAVE
+	default 3
+	range 0 100
+	help
+	  0 lets ESP-IDF choose its default (3). Higher saves more power but delays
+	  data from the access point.
+
+config APP_FEWER_WAKEUPS
+	bool "Sleep until the next sample instead of waking every second (step 2c)"
+	help
+	  The main loop waits in poll() until the next Modbus sample (at most
+	  10 s, below the 60 s MQTT keepalive) and only logs the network status
+	  while disconnected. Combine with CONFIG_PM=y for light sleep.
+
+config APP_MODEM_PSM
+	bool "Request PSM and eDRX from the SIM7080 at startup (step 2d)"
+	depends on NETWORK_CELLULAR
+	help
+	  Sends AT+CPSMS and AT+CEDRXS after the modem reset, before the driver
+	  starts. The firmware cannot read the replies at that point; check them
+	  with the AT shell (AT+CPSMS?, AT+CEDRXS?) in a modem-1 build. The network
+	  decides which timers are granted.
+
+config APP_MODEM_PSM_TAU
+	string "Requested periodic TAU (T3412 extended, 8 bits)"
+	depends on APP_MODEM_PSM
+	default "00100001"
+	help
+	  "00100001" = 1 x 10 min.
+
+config APP_MODEM_PSM_ACTIVE_TIME
+	string "Requested active time (T3324, 8 bits)"
+	depends on APP_MODEM_PSM
+	default "00000001"
+	help
+	  "00000001" = 1 x 2 s.
+
+config APP_MODEM_EDRX
+	string "Requested eDRX value for LTE-M (4 bits)"
+	depends on APP_MODEM_PSM
+	default "0101"
+	help
+	  "0101" = 81.92 s.
+
+endmenu
+
 source "Kconfig.zephyr"

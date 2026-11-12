@@ -11,7 +11,7 @@ VARIANT="${1:-}"
 # Uden argument spørges der i en terminal; uden terminal stopper scriptet
 if [[ -z "$VARIANT" && -t 0 ]]; then
   PS3="Vælg variant: "
-  select VARIANT in wifi modem; do
+  select VARIANT in wifi modem wifi-1 wifi-2a wifi-2b wifi-2c modem-1 modem-2a modem-2d; do
     [[ -n "$VARIANT" ]] && break
   done
 fi
@@ -20,8 +20,9 @@ fi
 case "$VARIANT" in
   wifi)  BUILD_DIR="$PROJECT/build-wifi" ;;
   modem) BUILD_DIR="$PROJECT/build-cellular" ;;
+  wifi-1|wifi-2a|wifi-2b|wifi-2c|modem-1|modem-2a|modem-2d) BUILD_DIR="$PROJECT/build-$VARIANT" ;;
   *)
-    echo "Brug: $0 [wifi|modem]" >&2
+    echo "Brug: $0 [wifi|modem|wifi-1|wifi-2a|wifi-2b|wifi-2c|modem-1|modem-2a|modem-2d]" >&2
     exit 1
     ;;
 esac
