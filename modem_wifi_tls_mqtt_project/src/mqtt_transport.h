@@ -6,7 +6,8 @@
 #define MQTT_TRANSPORT_H_
 
 #include <stdbool.h>
-
+#include <stddef.h>
+#include <stdint.h>
 /**
  * @brief Register the MQTT CA certificate in the TLS credential subsystem.
  *
@@ -48,3 +49,13 @@ int mqtt_transport_publish(const char *payload);
 bool mqtt_transport_is_connected(void);
 
 #endif /* MQTT_TRANSPORT_H_ */
+
+#include <stddef.h>
+#include <stdint.h>
+
+/*MQTT til bytes publish function*/
+int mqtt_transport_publish_bytes(
+    const char *topic,
+    const uint8_t *payload,
+    size_t payload_len
+);

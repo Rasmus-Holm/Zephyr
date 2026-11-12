@@ -233,42 +233,67 @@ int mqtt_transport_process(int timeout_ms)
 	return 0;
 }
 
-/* Publish one string payload on the established MQTT connection. */
+int mqtt_transport_publish_bytes(
+    const char *topic,
+    const uint8_t *payload,
+    size_t payload_len)
+{
+    struct mqtt_publish_param param = {0};
+    size_t topic_len;
+    int ret;
+
+    if (topic == NULL || payload == NULL || payload_len == 0) {
+        return -EINVAL;
+    }
+
+    if (!mqtt_connected) {
+        return -ENOTCONN;
+    }
+
+    topic_len = strlen(topic);
+
+    if (topic_len == 0 || topic_len > UINT16_MAX ||
+        payload_len > UINT32_MAX) {
+        return -EMSGSIZE;
+    }
+
+    param.message.topic.topic.utf8 = (uint8_t *)topic;
+    param.message.topic.topic.size = (uint16_t)topic_len;
+    param.message.topic.qos = MQTT_QOS_0_AT_MOST_ONCE;
+
+    param.message.payload.data = (uint8_t *)payload;
+    param.message.payload.len = (uint32_t)payload_len;
+
+    param.retain_flag = 0;
+    param.dup_flag = 0;
+
+    ret = mqtt_publish(&mqtt_client, &param);
+
+    if (ret < 0) {
+        LOG_ERR("MQTT publish failed: %d", ret);
+    } else {
+        LOG_INF("MQTT publish accepted locally: topic=%s, bytes=%u",
+                topic, (unsigned int)payload_len);
+    }
+
+    return ret;
+}
+
+/* Compatibility wrapper for the existing text test. */
 int mqtt_transport_publish(const char *payload)
 {
-	struct mqtt_publish_param publish_param = {0};
-	int ret;
+    if (payload == NULL) {
+        return -EINVAL;
+    }
 
-	if (!payload)
-	{
-		return -EINVAL;
-	}
-
-	publish_param.message.topic.topic.utf8 = (uint8_t *)MQTT_TOPIC;
-	publish_param.message.topic.topic.size = sizeof(MQTT_TOPIC) - 1;
-	publish_param.message.topic.qos = MQTT_QOS_0_AT_MOST_ONCE;
-	publish_param.message.payload.data = (uint8_t *)payload;
-	publish_param.message.payload.len = strlen(payload);
-	publish_param.message_id = 1;
-
-	LOG_INF("Publishing to mqtt");
-	ret = mqtt_publish(&mqtt_client, &publish_param);
-	if (ret < 0)
-	{
-		LOG_ERR("MQTT publish failed: %d", ret);
-		LOG_INF("publish failed");
-	}
-	else
-	{
-		LOG_INF("MQTT QoS 0 publish accepted locally: topic=%s; broker delivery unverified",
-				MQTT_TOPIC);
-		LOG_INF("Succesfully published");
-	}
-
-	return ret;
+    return mqtt_transport_publish_bytes(
+        MQTT_TOPIC,
+        (const uint8_t *)payload,
+        strlen(payload)
+    );
 }
 
 bool mqtt_transport_is_connected(void)
 {
-	return mqtt_connected;
+    return mqtt_connected;
 }
