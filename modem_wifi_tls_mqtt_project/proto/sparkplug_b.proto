@@ -1,0 +1,55 @@
+// Sparkplug B payload, trimmed for nanopb on the ESP32-C6.
+//
+// The field numbers and types are identical to the official Eclipse Tahu definition
+// (https://github.com/eclipse-tahu/tahu/blob/master/sparkplug_b/sparkplug_b.proto), so
+// payloads encoded here decode with any Sparkplug B host (Node-RED, Tahu, Ignition).
+// Fields we do not use (uuid, body, metadata, properties, bytes, DataSet, Template and the
+// extensions) are left out. A decoder skips unknown fields, so an NCMD that carries them
+// still decodes here.
+//
+// No package statement: it only shortens the generated C names (Payload, Payload_Metric,
+// DataType_UInt16) and is not part of the wire format.
+
+syntax = "proto2";
+
+enum DataType {
+    Unknown  = 0;
+    Int8     = 1;
+    Int16    = 2;
+    Int32    = 3;
+    Int64    = 4;
+    UInt8    = 5;
+    UInt16   = 6;
+    UInt32   = 7;
+    UInt64   = 8;
+    Float    = 9;
+    Double   = 10;
+    Boolean  = 11;
+    String   = 12;
+    DateTime = 13;
+    Text     = 14;
+}
+
+message Payload {
+    message Metric {
+        optional string name          = 1;  // Only in BIRTH messages
+        optional uint64 alias         = 2;  // Replaces the name in DATA messages
+        optional uint64 timestamp     = 3;  // Milliseconds since 1970 (UTC)
+        optional uint32 datatype      = 4;  // DataType; only required in BIRTH messages
+        optional bool   is_historical = 5;
+        optional bool   is_transient  = 6;
+        optional bool   is_null       = 7;
+        oneof value {
+            uint32 int_value     = 10;  // Int8/16/32 and UInt8/16/32
+            uint64 long_value    = 11;  // Int64, UInt64 and DateTime
+            float  float_value   = 12;
+            double double_value  = 13;
+            bool   boolean_value = 14;
+            string string_value  = 15;
+        }
+    }
+
+    optional uint64 timestamp = 1;  // Time the message was sent
+    repeated Metric metrics   = 2;
+    optional uint64 seq       = 3;  // 0-255; left out in NDEATH
+}

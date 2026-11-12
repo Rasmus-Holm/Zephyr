@@ -5,6 +5,7 @@
 #include "modbus_reader.h"
 #include "mqtt_transport.h"
 #include "network.h"
+#include "sparkplug_node.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -20,8 +21,6 @@ LOG_MODULE_REGISTER(MAIN);
 
 #define MQTT_SNTP_SERVER CONFIG_MQTT_SNTP_SERVER
 #define MODBUS_EXPECTED_TEST_VALUE 1234
-#define MODBUS_PUBLISH_INTERVAL_MS 5000
-#define MODBUS_PAYLOAD_BUFFER_SIZE 64
 
 /* False after a failed pre-TLS network check, so no TLS or MQTT is attempted on that link. */
 static bool mqtt_allowed = true;
@@ -86,10 +85,9 @@ static int synchronize_clock(void)
 	return 0;
 }
 
-/* Read and validate the RTU values before publishing the slave's uptime. */
-static int publish_modbus_uptime(void)
+/* Read and validate the RTU values and hand the slave's uptime to Sparkplug. */
+static void sample_modbus_uptime(void)
 {
-	char payload[MODBUS_PAYLOAD_BUFFER_SIZE];
 	uint16_t test_value;
 	uint16_t uptime_seconds;
 	int ret;
@@ -98,29 +96,24 @@ static int publish_modbus_uptime(void)
 	if (ret < 0)
 	{
 		LOG_ERR("Modbus RTU read failed: %d", ret);
-		return ret;
+		sparkplug_node_device_offline();
+		return;
 	}
 
 	if (test_value != MODBUS_EXPECTED_TEST_VALUE)
 	{
 		LOG_ERR("Modbus validation failed: register 0 = %u", test_value);
-		return -EINVAL;
+		sparkplug_node_device_offline();
+		return;
 	}
 
 	LOG_INF("Modbus sample: register 0 = %u, uptime = %u s", test_value, uptime_seconds);
-	ret = snprintk(payload, sizeof(payload), "payload %u", uptime_seconds);
-	if (ret < 0 || ret >= sizeof(payload))
-	{
-		LOG_ERR("Modbus payload formatting failed: %d", ret);
-		return -EMSGSIZE;
-	}
-
-	return mqtt_transport_publish(payload);
+	sparkplug_node_device_sample(uptime_seconds);
 }
 
 int main(void)
 {
-	int64_t next_modbus_publish_ms = 0;
+	int64_t next_modbus_sample_ms = 0;
 	bool modbus_ready = false;
 	int ret;
 
@@ -134,12 +127,19 @@ int main(void)
 	else
 	{
 		modbus_ready = true;
-		LOG_INF("Modbus RTU client ready; sample interval %d ms", MODBUS_PUBLISH_INTERVAL_MS);
+		LOG_INF("Modbus RTU client ready; sample interval %u ms",
+			sparkplug_node_sample_interval_ms());
 	}
 
 	if (mqtt_transport_tls_init() < 0)
 	{
 		LOG_ERR("TLS initialization failed");
+		return 0;
+	}
+
+	if (sparkplug_node_init() < 0)
+	{
+		LOG_ERR("Sparkplug B initialization failed");
 		return 0;
 	}
 
@@ -155,9 +155,9 @@ int main(void)
 			LOG_ERR("Stopping before TLS: plain TCP to broker failed");
 			mqtt_allowed = false;
 		}
-		else if (synchronize_clock() == 0 && mqtt_transport_establish() == 0)
+		else if (synchronize_clock() == 0 && sparkplug_node_connect() == 0)
 		{
-			next_modbus_publish_ms = k_uptime_get();
+			next_modbus_sample_ms = k_uptime_get();
 		}
 	}
 
@@ -168,6 +168,7 @@ int main(void)
 		if (mqtt_transport_is_connected())
 		{
 			mqtt_transport_process(1000);
+			sparkplug_node_process();
 		}
 		else
 		{
@@ -176,18 +177,18 @@ int main(void)
 			if (mqtt_allowed && network_has_ipv4() &&
 			    (clock_synchronized || synchronize_clock() == 0))
 			{
-				if (mqtt_transport_establish() == 0)
+				if (sparkplug_node_connect() == 0)
 				{
-					next_modbus_publish_ms = k_uptime_get();
+					next_modbus_sample_ms = k_uptime_get();
 				}
 			}
 		}
 
 		if (mqtt_transport_is_connected() && modbus_ready &&
-		    k_uptime_get() >= next_modbus_publish_ms)
+		    k_uptime_get() >= next_modbus_sample_ms)
 		{
-			publish_modbus_uptime();
-			next_modbus_publish_ms = k_uptime_get() + MODBUS_PUBLISH_INTERVAL_MS;
+			sample_modbus_uptime();
+			next_modbus_sample_ms = k_uptime_get() + sparkplug_node_sample_interval_ms();
 		}
 	}
 }

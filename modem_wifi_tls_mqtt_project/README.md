@@ -1,4 +1,4 @@
-<!-- _Formål: Dokumentere det Zephyr-projekt, der tester Wi-Fi, TLS og almindelig MQTT uden SparkplugB mod en Linux-Mosquitto-broker. -->
+<!-- _Formål: Dokumentere det Zephyr-projekt, der sender Modbus-data som Sparkplug B (nanopb) over MQTT/TLS via Wi-Fi eller Stamp CatM. -->
 
 # 1. wifi-tls-no-sparkplugB
 
@@ -8,6 +8,7 @@
   - [1.1. 📋 Indholdsfortegnelse](#11--indholdsfortegnelse)
   - [1.2. Formål og scope](#12-formål-og-scope)
   - [1.3. Pipeline](#13-pipeline)
+    - [1.3.1. Sparkplug B](#131-sparkplug-b)
   - [1.4. Lokal konfiguration](#14-lokal-konfiguration)
   - [1.5. Filer til hver version](#15-filer-til-hver-version)
   - [1.6. Build](#16-build)
@@ -18,6 +19,8 @@
     - [1.8.2. Uret over mobilnettet](#182-uret-over-mobilnettet)
     - [1.8.3. Kontrol af certifikatets datoer](#183-kontrol-af-certifikatets-datoer)
   - [1.9. Åbne punkter](#19-åbne-punkter)
+
+> **Sparkplug B (2026-11-12):** Firmwaren sender nu Sparkplug B-protobuf (nanopb) i stedet for `payload N` på `CONFIG_MQTT_TOPIC`. Se [1.3.1](#131-sparkplug-b). Afsnittene nedenfor beskriver de tidligere tests uden Sparkplug B.
 
 Dette er en ESP32-C6/Zephyr test- og udviklingsapplikation til Wi-Fi eller Stamp CatM/cellular og MQTT over TLS uden SparkplugB. Begge netværksvarianter deler TLS-, MQTT- og Modbus-koden. Projektet er samme TLS- og MQTT-spor som `wifi-tls-with-sparkplugB`, men uden protobuf, nanopb, birth/death-payloads og will-message. Det er ikke den færdige Project A-firmware eller fuld cellular acceptance.
 
@@ -36,9 +39,45 @@ Wi-Fi
     -> TCP 8883
     -> TLS 1.2 med public CA og IP-SAN, uden SNI
     -> MQTT 3.1.1 CONNECT og CONNACK
-    -> Modbus RTU register 1 læses hvert 10. sekund
-    -> QoS 0 publish af `payload N` til CONFIG_MQTT_TOPIC
+    -> MQTT CONNECT med NDEATH som Last Will, SUBSCRIBE til STATE, NCMD og DCMD
+    -> venter på STATE {"online": true} fra red_01
+    -> NBIRTH (og DBIRTH, når Modbus-slaven har svaret)
+    -> Modbus RTU register 1 læses hvert Config/SampleInterval_s (standard 10 s)
+    -> QoS 0 DDATA med 3 målinger ad gangen, hver med eget tidsstempel
 ```
+
+### 1.3.1. Sparkplug B
+
+Topics og beskedtyper følger afsnittet "Sparkplug B i Projekt A" i rapporten. ID'erne er Kconfig-værdier (`CONFIG_SPARKPLUG_GROUP_ID`, `..._EDGE_NODE_ID`, `..._DEVICE_ID`):
+
+| Type   | Topic                                     | Indhold                                                           |
+| ------ | ----------------------------------------- | ----------------------------------------------------------------- |
+| NBIRTH | `spBv1.0/gruppe_4/NBIRTH/c6-01`           | `bdSeq`, `Node Control/Rebirth`, `Config/SampleInterval_s` (alias 4) |
+| NDATA  | `spBv1.0/gruppe_4/NDATA/c6-01`            | Nyt måleinterval efter en NCMD (alias 4)                          |
+| NDEATH | `spBv1.0/gruppe_4/NDEATH/c6-01`           | `bdSeq`; registreret som Last Will (QoS 1, ingen retain)          |
+| NCMD   | `spBv1.0/gruppe_4/NCMD/c6-01`             | Modtages: `Node Control/Rebirth` og `Config/SampleInterval_s` (1-3600) |
+| DBIRTH | `spBv1.0/gruppe_4/DBIRTH/c6-01/wroom_01`  | `Status/Uptime_s` (alias 10, UInt16) fra Modbus-slaven            |
+| DDATA  | `spBv1.0/gruppe_4/DDATA/c6-01/wroom_01`   | `CONFIG_SPARKPLUG_BATCH_SIZE` målinger med alias og tidsstempel   |
+| DDEATH | `spBv1.0/gruppe_4/DDEATH/c6-01/wroom_01`  | Sendes, når en Modbus-læsning fejler; næste gode læsning giver ny DBIRTH |
+| DCMD   | `spBv1.0/gruppe_4/DCMD/c6-01/#`           | Abonneres, men ignoreres: enheden har ingen skrivbare metrics endnu |
+| STATE  | `spBv1.0/STATE/red_01`                    | Modtages (JSON): NBIRTH sendes først ved `"online": true`; ved `"online": false` sender noden NDEATH og forbinder igen |
+
+Host-ID'et er `CONFIG_SPARKPLUG_PRIMARY_HOST_ID` (standard `red_01`). Node-RED skal derfor publicere `{"online": true, "timestamp": ...}` med retain på `spBv1.0/STATE/red_01`, ellers sender noden aldrig NBIRTH. En tom værdi slår ventetiden fra. STATE-beskeder med ældre `timestamp` end den senest modtagne ignoreres.
+
+`bdSeq` tælles op ved hver ny MQTT-forbindelse og står både i NDEATH-willen og i NBIRTH. `seq` starter på 0 i NBIRTH og tælles op for hver efterfølgende besked (0-255). Alias 1-3 er reserveret til `Process/Temperature`, `Status/CellularRSSI` og `Status/SupplyVoltage` fra rapporten, når de målinger findes.
+
+Payloads kodes med nanopb ud fra `proto/sparkplug_b.proto`. Filen er en slanket udgave af Eclipse Tahus `sparkplug_b.proto` med samme feltnumre, så Node-RED/Tahu kan afkode dem; ubrugte felter (DataSet, Template, properties m.m.) er udeladt, og `proto/sparkplug_b.options` giver faste størrelser i stedet for callbacks. Målte størrelser: NBIRTH 104 B, DBIRTH 41 B, DDATA med 3 målinger 49 B, NDEATH 20 B.
+
+Koden ligger i `src/sparkplug_payload.c` (protobuf og topics) og `src/sparkplug_node.c` (Sparkplug-forløbet). `CONFIG_MQTT_TOPIC` bruges ikke længere, men findes stadig, så eksisterende `wifi-local.conf`-filer bygger.
+
+Verificeret 2026-11-12: Begge varianter bygger uden advarsler mod Zephyr `main` 1cacc749 (de modulversioner, der ligger i workspace). Beskederne er afkodet med Tahus officielle proto i Python, og en NCMD lavet af Python-protobuf med ekstra felter blev læst korrekt. STATE-forløbet (vent på online, ignorér ældre STATE, NDEATH og disconnect ved offline, ny NBIRTH med næste bdSeq) er testet på PC med falsk MQTT-transport. Ikke kørt på hardware eller mod brokeren endnu.
+
+Åbne punkter for Sparkplug B:
+
+- `bdSeq` starter på 0 ved hver opstart. Spec'en anbefaler at gemme den i flash, så en host kan skelne en genstart fra den forrige forbindelse.
+- Rapporten skriver både `red-01` og `red_01` for host-applikationen; firmwaren bruger `red_01`, så tabellen "Navne og ID'er" i rapporten bør rettes.
+- Målinger fra forbindelsestab til ny NBIRTH/DBIRTH kasseres; DBIRTH sender den seneste værdi.
+- Én fejlet Modbus-læsning giver DDEATH. Hvis slaven ofte svarer for sent, bør der kræves flere fejl i træk.
 
 Firmwaren forbinder til brokeren i den adresse, der står i `CONFIG_MQTT_BROKER_ADDRESS`. Den offentlige CA i `src/tls_credentials.h` er identisk med CA'en i `wifi-tls-with-sparkplugB`, og den aktive konfiguration i `wifi-local.conf` peger på Webdock-brokeren `92.113.144.124`.
 

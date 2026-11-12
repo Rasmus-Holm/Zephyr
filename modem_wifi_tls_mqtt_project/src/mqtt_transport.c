@@ -23,10 +23,13 @@ LOG_MODULE_REGISTER(mqtt_transport);
 #define MQTT_BROKER_ADDRESS CONFIG_MQTT_BROKER_ADDRESS
 #define MQTT_BROKER_PORT 8883
 #define MQTT_CLIENT_ID CONFIG_MQTT_CLIENT_ID
-#define MQTT_TOPIC CONFIG_MQTT_TOPIC
+/* tx holds the CONNECT packet with the will; publish payloads are sent separately (iovec). */
 #define MQTT_BUFFER_SIZE 256
 #define MQTT_CONNECT_TIMEOUT_MS 5000
 #define MQTT_CA_CERT_TAG 1
+/* Largest incoming payload (NCMD/DCMD) and topic we keep; longer ones are dropped. */
+#define MQTT_RX_PAYLOAD_SIZE 512
+#define MQTT_RX_TOPIC_SIZE 128
 
 static uint8_t mqtt_rx_buffer[MQTT_BUFFER_SIZE];
 static uint8_t mqtt_tx_buffer[MQTT_BUFFER_SIZE];
@@ -35,6 +38,15 @@ static struct sockaddr_storage mqtt_broker;
 static struct pollfd mqtt_pollfd;
 static bool mqtt_connected;
 static int mqtt_connect_result;
+
+static struct mqtt_topic mqtt_will_topic;
+static struct mqtt_utf8 mqtt_will_message;
+static bool mqtt_will_set;
+
+static mqtt_transport_rx_cb_t mqtt_rx_callback;
+static uint8_t mqtt_rx_payload[MQTT_RX_PAYLOAD_SIZE];
+static char mqtt_rx_topic[MQTT_RX_TOPIC_SIZE];
+static uint16_t mqtt_next_message_id = 1;
 
 static sec_tag_t mqtt_sec_tags[] = {MQTT_CA_CERT_TAG};
 
@@ -53,10 +65,97 @@ int mqtt_transport_tls_init(void)
 	return ret;
 }
 
+void mqtt_transport_set_rx_callback(mqtt_transport_rx_cb_t callback)
+{
+	mqtt_rx_callback = callback;
+}
+
+void mqtt_transport_set_will(const char *topic, const uint8_t *payload, size_t length)
+{
+	if (topic == NULL)
+	{
+		mqtt_will_set = false;
+		return;
+	}
+
+	mqtt_will_topic.topic.utf8 = (const uint8_t *)topic;
+	mqtt_will_topic.topic.size = strlen(topic);
+	mqtt_will_topic.qos = MQTT_QOS_1_AT_LEAST_ONCE;
+	mqtt_will_message.utf8 = payload;
+	mqtt_will_message.size = length;
+	mqtt_will_set = true;
+}
+
+static uint16_t mqtt_message_id(void)
+{
+	uint16_t id = mqtt_next_message_id++;
+
+	if (mqtt_next_message_id == 0)
+	{
+		mqtt_next_message_id = 1;
+	}
+
+	return id;
+}
+
+/* Read a received PUBLISH, acknowledge QoS 1, and hand it to the callback. */
+static void mqtt_handle_publish(struct mqtt_client *client, const struct mqtt_evt *evt)
+{
+	const struct mqtt_publish_param *publish = &evt->param.publish;
+	size_t payload_length = publish->message.payload.len;
+	size_t topic_length = publish->message.topic.topic.size;
+	bool fits = payload_length <= sizeof(mqtt_rx_payload) &&
+		    topic_length < sizeof(mqtt_rx_topic);
+	int ret;
+
+	/* The topic points into the rx buffer and is overwritten when the payload is read. */
+	if (fits)
+	{
+		memcpy(mqtt_rx_topic, publish->message.topic.topic.utf8, topic_length);
+		mqtt_rx_topic[topic_length] = '\0';
+	}
+
+	/* The payload must always be read off the socket, also when it is dropped. */
+	for (size_t done = 0; done < payload_length;)
+	{
+		size_t chunk = MIN(payload_length - done, sizeof(mqtt_rx_payload));
+		uint8_t *dest = fits ? &mqtt_rx_payload[done] : mqtt_rx_payload;
+
+		ret = mqtt_readall_publish_payload(client, dest, chunk);
+		if (ret < 0)
+		{
+			LOG_ERR("MQTT payload read failed: %d", ret);
+			return;
+		}
+		done += chunk;
+	}
+
+	if (publish->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE)
+	{
+		struct mqtt_puback_param ack = {.message_id = publish->message_id};
+
+		ret = mqtt_publish_qos1_ack(client, &ack);
+		if (ret < 0)
+		{
+			LOG_ERR("MQTT PUBACK failed: %d", ret);
+		}
+	}
+
+	if (!fits)
+	{
+		LOG_WRN("Dropped incoming MQTT message: topic %zu bytes, payload %zu bytes",
+			topic_length, payload_length);
+		return;
+	}
+
+	if (mqtt_rx_callback != NULL)
+	{
+		mqtt_rx_callback(mqtt_rx_topic, mqtt_rx_payload, payload_length);
+	}
+}
+
 static void mqtt_event_handler(struct mqtt_client *client, const struct mqtt_evt *evt)
 {
-	ARG_UNUSED(client);
-
 	switch (evt->type)
 	{
 	case MQTT_EVT_CONNACK:
@@ -78,6 +177,17 @@ static void mqtt_event_handler(struct mqtt_client *client, const struct mqtt_evt
 		}
 		mqtt_connected = false;
 		LOG_INF("MQTT disconnected: %d", evt->result);
+		break;
+	case MQTT_EVT_PUBLISH:
+		if (evt->result != 0)
+		{
+			LOG_ERR("MQTT PUBLISH receive error: %d", evt->result);
+			break;
+		}
+		mqtt_handle_publish(client, evt);
+		break;
+	case MQTT_EVT_SUBACK:
+		LOG_INF("MQTT SUBACK received for message id %u", evt->param.suback.message_id);
 		break;
 	default:
 		break;
@@ -107,6 +217,12 @@ static int mqtt_client_setup(void)
 	mqtt_client.rx_buf_size = sizeof(mqtt_rx_buffer);
 	mqtt_client.tx_buf = mqtt_tx_buffer;
 	mqtt_client.tx_buf_size = sizeof(mqtt_tx_buffer);
+	if (mqtt_will_set)
+	{
+		mqtt_client.will_topic = &mqtt_will_topic;
+		mqtt_client.will_message = &mqtt_will_message;
+		mqtt_client.will_retain = 0U;
+	}
 	mqtt_client.transport.type = MQTT_TRANSPORT_SECURE;
 	struct mqtt_sec_config *tls_config = &mqtt_client.transport.tls.config;
 
@@ -233,38 +349,75 @@ int mqtt_transport_process(int timeout_ms)
 	return 0;
 }
 
-/* Publish one string payload on the established MQTT connection. */
-int mqtt_transport_publish(const char *payload)
+int mqtt_transport_subscribe(const char *topic)
+{
+	struct mqtt_topic subscription = {
+		.topic = {.utf8 = (const uint8_t *)topic, .size = strlen(topic)},
+		.qos = MQTT_QOS_1_AT_LEAST_ONCE,
+	};
+	struct mqtt_subscription_list list = {
+		.list = &subscription,
+		.list_count = 1,
+		.message_id = mqtt_message_id(),
+	};
+	int ret = mqtt_subscribe(&mqtt_client, &list);
+
+	if (ret < 0)
+	{
+		LOG_ERR("MQTT subscribe to %s failed: %d", topic, ret);
+	}
+	else
+	{
+		LOG_INF("MQTT subscribe sent: %s", topic);
+	}
+
+	return ret;
+}
+
+/* Publish one binary payload on the established MQTT connection. */
+int mqtt_transport_publish(const char *topic, const uint8_t *payload, size_t length)
 {
 	struct mqtt_publish_param publish_param = {0};
 	int ret;
 
-	if (!payload)
+	if (topic == NULL || (payload == NULL && length > 0))
 	{
 		return -EINVAL;
 	}
 
-	publish_param.message.topic.topic.utf8 = (uint8_t *)MQTT_TOPIC;
-	publish_param.message.topic.topic.size = sizeof(MQTT_TOPIC) - 1;
+	publish_param.message.topic.topic.utf8 = (const uint8_t *)topic;
+	publish_param.message.topic.topic.size = strlen(topic);
 	publish_param.message.topic.qos = MQTT_QOS_0_AT_MOST_ONCE;
 	publish_param.message.payload.data = (uint8_t *)payload;
-	publish_param.message.payload.len = strlen(payload);
-	publish_param.message_id = 1;
+	publish_param.message.payload.len = length;
+	/* QoS 0 has no packet identifier. */
+	publish_param.message_id = 0;
 
-	LOG_INF("Publishing to mqtt");
 	ret = mqtt_publish(&mqtt_client, &publish_param);
 	if (ret < 0)
 	{
-		LOG_ERR("MQTT publish failed: %d", ret);
-		LOG_INF("publish failed");
+		LOG_ERR("MQTT publish to %s failed: %d", topic, ret);
 	}
 	else
 	{
-		LOG_INF("MQTT QoS 0 publish accepted locally: topic=%s; broker delivery unverified",
-				MQTT_TOPIC);
-		LOG_INF("Succesfully published");
+		LOG_INF("MQTT QoS 0 publish accepted locally: %s (%zu bytes); broker delivery unverified",
+			topic, length);
 	}
 
+	return ret;
+}
+
+int mqtt_transport_close(void)
+{
+	int ret = mqtt_disconnect(&mqtt_client, NULL);
+
+	if (ret < 0)
+	{
+		LOG_ERR("MQTT disconnect failed: %d", ret);
+		mqtt_abort(&mqtt_client);
+	}
+
+	mqtt_connected = false;
 	return ret;
 }
 

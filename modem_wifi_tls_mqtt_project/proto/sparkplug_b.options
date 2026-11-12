@@ -1,0 +1,7 @@
+# nanopb sizes for sparkplug_b.proto. Fixed sizes give static structs instead of callbacks.
+# Payload.metrics: NBIRTH has 3 metrics; NDATA/DDATA hold a batch of samples plus changed
+# config values (see CONFIG_SPARKPLUG_BATCH_SIZE, max 12).
+Payload.metrics              max_count:16
+# Longest name today is "Config/SampleInterval_s" (23 characters).
+Payload.Metric.name          max_size:48
+Payload.Metric.string_value  max_size:32

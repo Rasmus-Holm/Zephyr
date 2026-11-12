@@ -39,8 +39,56 @@ config MQTT_CLIENT_ID
 	default "esp32c6-wifi-tls"
 
 config MQTT_TOPIC
-	string "MQTT test topic"
+	string "MQTT test topic (unused)"
 	default "iot/test"
+	help
+	  Not used since the firmware publishes Sparkplug B topics (see SPARKPLUG_*).
+	  Kept so existing wifi-local.conf files that set it still build.
+
+menu "Sparkplug B"
+
+config SPARKPLUG_GROUP_ID
+	string "Sparkplug group ID"
+	default "gruppe_4"
+	help
+	  <group_id> in spBv1.0/<group_id>/<message type>/<edge_node_id>[/<device_id>].
+
+config SPARKPLUG_EDGE_NODE_ID
+	string "Sparkplug edge node ID"
+	default "c6-01"
+	help
+	  This ESP32-C6. The broker ACL should only let it write its own topics.
+
+config SPARKPLUG_DEVICE_ID
+	string "Sparkplug device ID of the Modbus slave"
+	default "wroom_01"
+	help
+	  The Modbus RTU slave read by this node; it gets DBIRTH, DDATA and DDEATH.
+
+config SPARKPLUG_PRIMARY_HOST_ID
+	string "Sparkplug primary host application ID"
+	default "red_01"
+	help
+	  The node subscribes to spBv1.0/STATE/<id> and only publishes NBIRTH while the host
+	  reports {"online": true}. When it reports offline, the node sends NDEATH and
+	  reconnects. Leave empty to publish without waiting for a host.
+
+config SPARKPLUG_SAMPLE_INTERVAL_S
+	int "Seconds between Modbus samples at boot"
+	default 10
+	range 1 3600
+	help
+	  Published as Config/SampleInterval_s; an NCMD can change it at runtime.
+
+config SPARKPLUG_BATCH_SIZE
+	int "Samples per DDATA message"
+	default 3
+	range 1 12
+	help
+	  Samples are collected and sent together, each with its own timestamp, to save data.
+	  A sample reaches the broker up to SAMPLE_INTERVAL_S * BATCH_SIZE seconds late.
+
+endmenu
 
 config MQTT_SNTP_SERVER
 	string "SNTP server name or IPv4 address"
