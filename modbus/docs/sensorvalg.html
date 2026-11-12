@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="da"><head><meta charset="utf-8"><title>Sensorvalg til ESP32- og Modbus-delen</title></head>
+<body style="font-family:Arial,sans-serif;font-size:11pt;max-width:820px;margin:24px auto;color:#000;background:#fff">
+
+<h2>Sensorvalg til ESP32- og Modbus-delen</h2>
+<p>Vi anbefaler <b>DS18B20 (temperatur), GY-521 (vibration) og ACS712 (strøm)</b>. Sammen overvåger de en maskine, og det er en typisk industriel IIoT-opgave. Kit 2 har også en lille "maskine", vi kan overvåge: DC-motoren på robotbil-chassiset med L9110H-motordriveren.</p>
+
+<h3>De tre sensorer</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+<tr style="background:#e8e8e8"><th align="left">Sensor</th><th align="left">Måler på maskinen</th><th align="left">Hvorfor den</th><th align="left">Zephyr-driver</th></tr>
+<tr><td><b>DS18B20</b> temperaturføler, 1 m kabel</td><td>Motorens temperatur</td><td>Præcis (ca. ±0,5 °C), vandtæt føler og lavt strømforbrug</td><td>Ja, <code>maxim,ds18b20</code> via 1-Wire på en GPIO (<code>zephyr,w1-gpio</code>)</td></tr>
+<tr><td><b>GY-521</b> (MPU6050) accelerometer</td><td>Vibration</td><td>Unormal vibration er et klassisk tidligt tegn på slid og fejl</td><td>Ja, <code>invensense,mpu6050</code> (I2C)</td></tr>
+<tr><td><b>ACS712</b> strømmåler, 30 A</td><td>Motorens strøm og belastning</td><td>Høj strøm betyder, at motoren er overbelastet eller kører tungt</td><td>Måles via <b>ADS1115</b> (<code>ti,ads1115</code>, I2C), som også er i kittet</td></tr>
+</table>
+
+<h3>Sådan opfylder det de nye krav</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+<tr style="background:#e8e8e8"><th align="left">Krav</th><th align="left">Sådan</th></tr>
+<tr><td><b>1. Mindst tre sensorer</b></td><td>DS18B20, GY-521 og ACS712</td></tr>
+<tr><td><b>2. Behandling, der fører til beslutninger</b></td><td>Ikke bare rå værdier: et glidende gennemsnit af temperaturen, vibrationsniveauet (RMS) og strømmen. De sammenlignes med grænseværdier og bliver til en tilstand: OK, Advarsel eller Alarm.</td></tr>
+<tr><td><b>3. Handling via Modbus og ESP32</b></td><td>Ved advarsel tænder ESP32'en en ventilator via <b>XY-MOS MOSFET-modulet</b>. Ved alarm aktiveres <b>buzzeren</b>, og motoren stoppes via <b>SSR-relæet</b> eller motordriveren.</td></tr>
+<tr><td><b>3. Kommunikation begge veje</b></td><td>Den ene vej går målinger og tilstand. Den anden vej går kommandoer og grænseværdier, fx "kvittér alarm" eller "ny temperaturgrænse 45 °C". Det kan sendes fra cloud via Sparkplug NCMD.</td></tr>
+<tr><td><b>4. Modbus</b></td><td>NodeMCU ESP32 fra kit 2 kan være sensor- og aktuatornode. Den kan tale Modbus TCP over Wi-Fi eller Modbus RTU via HW-519 og RS485 med vores ESP32-C6. ESP32-C6'en sender så videre over mobilnettet. Det kobler Modbus-delen til resten af Projekt A, som kravet siger.</td></tr>
+</table>
+<p>Det svarer til instruktørens "Vigtigt"-punkt: Målinger (temperatur, vibration og strøm) behandles (gennemsnit og grænser), og behandlingen fører til en handling (ventilator, alarm, stop), som kan ses i cloud.</p>
+
+<h3>Det skal vi være opmærksomme på</h3>
+<ul>
+<li><b>ACS712 30 A er grov ved små strømme.</b> Den giver kun ca. 66 mV pr. ampere. En lille DC-motor bruger måske 0,1–0,5 A, så signalet bliver lille. Det er derfor, vi skal bruge ADS1115 (16 bit) og ikke ESP32'ens egen ADC.</li>
+<li><b>ACS712 kører på 5 V.</b> Dens udgang kan gå op til 5 V, og ESP32 tåler kun 3,3 V. Forsyn ADS1115 med 5 V, og brug <b>level converteren</b> fra kit 2 på I2C-linjerne. Ellers skal vi tjekke, at signalet holder sig under 3,3 V.</li>
+<li><b>Vibration kræver hurtige målinger.</b> MPU6050 skal måles ofte, fx 100–500 gange i sekundet i korte perioder. Kun resultatet (RMS) sendes videre. Det passer fint til kravet om lavt dataforbrug.</li>
+</ul>
+
+<h3>Plan B, hvis motorovervågning bliver for meget</h3>
+<p>Indeklima og luftkvalitet styrer en ventilator: <b>BMP280</b> (temperatur og tryk) + <b>DHT-11</b> (fugtighed) + <b>MQ135</b> (luftkvalitet). Det er lettere at forklare, men mindre industrielt. MQ135 har desuden et varmelegeme, der hele tiden bruger ca. 150 mA ved 5 V. Det passer dårligt til kravet om lavt strømforbrug i Projekt A.</p>
+
+</body></html>

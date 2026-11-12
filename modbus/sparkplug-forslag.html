@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="da"><head><meta charset="utf-8"><title>Sparkplug B i Projekt A</title></head>
+<body style="font-family:Arial,sans-serif;font-size:11pt;max-width:820px;margin:24px auto;color:#000;background:#fff">
+
+<h2>Sparkplug B i Projekt A</h2>
+<p>Vores ESP32-C6 sender sine målinger som Sparkplug B-beskeder over MQTT. Beskederne går krypteret med TLS via mobilmodemet M5Stack Stamp CatM (SIMCom SIM7080G, LTE-M/NB-IoT) til vores egen cloud-server. Sparkplug B dækker kravet om device-id, timestamp og aflæste værdier. Formatet giver også små payloads, så dataforbruget holdes nede.</p>
+<p><i>Status: forslag. I dag bruger vi almindelige MQTT-topics og JSON. Navne på målinger og ID'er er eksempler og skal tilpasses de sensorer, vi ender med.</i></p>
+
+<h3>Sådan opfylder Sparkplug B datakravene</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+<tr style="background:#e8e8e8"><th align="left">Krav i projektbeskrivelsen</th><th align="left">Hvor det ligger i Sparkplug B</th></tr>
+<tr><td>device-id</td><td>I topic'et som edge node-ID, fx <code>esp32c6-a01</code>, og som device-ID for enheder bag noden</td></tr>
+<tr><td>timestamp</td><td>Feltet <code>timestamp</code> på hele beskeden og på hver enkelt måling, i millisekunder siden 1970 (UTC)</td></tr>
+<tr><td>Aflæste værdier</td><td>Listen <code>metrics</code> med navn eller alias, datatype og værdi</td></tr>
+<tr><td>MQTT-beskeder</td><td>Topics af formen <code>spBv1.0/&lt;group&gt;/&lt;type&gt;/&lt;edge node&gt;[/&lt;device&gt;]</code></td></tr>
+<tr><td>Data med fast interval (5–15 sek.)</td><td>ESP32-C6'en måler fx hvert 10. sekund og sender målingerne som NDATA (se Lavt dataforbrug)</td></tr>
+</table>
+
+<h3>Arkitektur</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+<tr style="background:#e8e8e8"><th align="left">Lag</th><th align="left">Hos os</th><th align="left">Rolle i Sparkplug</th></tr>
+<tr><td>Sensorer</td><td>Sensorer på ESP32-C6'en og evt. en Modbus-sensor via HW-519 og RS485</td><td>Nodens egne målinger. Modbus-sensoren er en device bag noden.</td></tr>
+<tr><td>Enhed</td><td>ESP32-C6-DevKitC med Zephyr RTOS og M5Stack Stamp CatM (SIM7080G) med det udleverede SIM-kort</td><td>Edge Node</td></tr>
+<tr><td>Transport</td><td>LTE-M (eller NB-IoT) og internet, MQTT over TLS på port 8883</td><td>Sparkplug B kører oven på almindelig MQTT</td></tr>
+<tr><td>Cloud-server</td><td>Vores egen server med Mosquitto i Docker (TLS, login og adgangsregler)</td><td>MQTT-mægler. Den skal ikke kende Sparkplug.</td></tr>
+<tr><td>Dataopsamling</td><td>Program på samme server, der gemmer og viser data, fx Node-RED og en database i Docker</td><td>Host Application</td></tr>
+</table>
+
+<h3>Navne og ID'er</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+<tr style="background:#e8e8e8"><th align="left">Sparkplug-begreb</th><th align="left">ID</th><th align="left">Hvad det er</th></tr>
+<tr><td>Group</td><td><code>UCL_ProjektA</code></td><td>Vores projekt</td></tr>
+<tr><td>Edge Node</td><td><code>esp32c6-a01</code></td><td>Vores ESP32-C6. Det er vores device-id.</td></tr>
+<tr><td>Device</td><td><code>modbus-sensor-1</code></td><td>Valgfri Modbus-sensor via RS485, der læses af ESP32-C6'en</td></tr>
+<tr><td>Host Application</td><td><code>cloud-host-01</code></td><td>Dataopsamlingen på vores cloud-server</td></tr>
+</table>
+
+<h3>Beskedtyper og topics</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+<tr style="background:#e8e8e8"><th align="left">Type</th><th align="left">Topic</th><th align="left">Hvornår</th></tr>
+<tr><td>NBIRTH</td><td><code>spBv1.0/UCL_ProjektA/NBIRTH/esp32c6-a01</code></td><td>ESP32-C6'en er forbundet. Indeholder alle dens målinger med navn, alias og datatype.</td></tr>
+<tr><td>NDATA</td><td><code>spBv1.0/UCL_ProjektA/NDATA/esp32c6-a01</code></td><td>Nye målinger</td></tr>
+<tr><td>NDEATH</td><td><code>spBv1.0/UCL_ProjektA/NDEATH/esp32c6-a01</code></td><td>ESP32-C6'en er offline. Registreres som MQTT "Last Will", så mægleren sender den, hvis forbindelsen dør.</td></tr>
+<tr><td>NCMD</td><td><code>spBv1.0/UCL_ProjektA/NCMD/esp32c6-a01</code></td><td>Kommando til ESP32-C6'en, fx "send birth igen" eller "skift måleinterval"</td></tr>
+<tr><td>DBIRTH / DDATA / DDEATH</td><td><code>spBv1.0/UCL_ProjektA/DDATA/esp32c6-a01/modbus-sensor-1</code></td><td>Det samme for Modbus-sensoren bag ESP32-C6'en</td></tr>
+<tr><td>DCMD</td><td><code>spBv1.0/UCL_ProjektA/DCMD/esp32c6-a01/modbus-sensor-1</code></td><td>Kommando, som ESP32-C6'en oversætter til en Modbus-skrivning</td></tr>
+<tr><td>STATE</td><td><code>spBv1.0/STATE/cloud-host-01</code></td><td>Dataopsamlingen melder, om den er online</td></tr>
+</table>
+
+<h3>Forløb fra opstart til drift</h3>
+<ol>
+<li>Dataopsamlingen på serveren forbinder og publicerer <code>STATE</code> med <code>"online": true</code>.</li>
+<li>ESP32-C6'en tænder Stamp CatM, kommer på mobilnettet og opretter en TLS-forbindelse til mægleren på port 8883.</li>
+<li>Ved forbindelsen registrerer ESP32-C6'en sin NDEATH som "Last Will".</li>
+<li>ESP32-C6'en sender NBIRTH med alle målinger og et tællernummer, <code>bdSeq</code>. Har den en Modbus-sensor, sender den også DBIRTH.</li>
+<li>Derefter måler den med fast interval og sender NDATA. Hver besked har et løbenummer, <code>seq</code>, fra 0 til 255.</li>
+<li>Mangler et løbenummer, sender serveren NCMD <code>Node Control/Rebirth</code>, og ESP32-C6'en sender sine birth-beskeder igen.</li>
+<li>Mister ESP32-C6'en forbindelsen, sender mægleren dens NDEATH, og serveren markerer data som forældede.</li>
+</ol>
+
+<h3>Payloads</h3>
+<p>Sparkplug B-payloads sendes som <b>Protobuf</b>, altså binært, ikke som JSON. Eksemplerne herunder viser indholdet som JSON, så det kan læses. Kun STATE-beskeden er rigtig JSON.</p>
+
+<p><b>NBIRTH:</b> skal altid indeholde <code>bdSeq</code> og <code>Node Control/Rebirth</code>. Derefter følger alle målinger med fulde navne og et kort alias.</p>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%"><tr><td style="background:#f3f3f3"><pre style="font-family:'Courier New',monospace;font-size:9.5pt;margin:0">{
+  "timestamp": 1792570000000,
+  "seq": 0,
+  "metrics": [
+    { "name": "bdSeq",                   "datatype": "UInt64",  "value": 0 },
+    { "name": "Node Control/Rebirth",    "datatype": "Boolean", "value": false },
+    { "name": "Process/Temperature",     "alias": 1, "datatype": "Float",  "value": 22.8 },
+    { "name": "Status/CellularRSSI",     "alias": 2, "datatype": "Int32",  "value": -85 },
+    { "name": "Status/SupplyVoltage",    "alias": 3, "datatype": "Float",  "value": 3.29 },
+    { "name": "Config/SampleInterval_s", "alias": 4, "datatype": "UInt16", "value": 10 }
+  ]
+}</pre></td></tr></table>
+
+<p><b>NDATA med samlede målinger:</b> tre temperaturmålinger med 10 sekunders mellemrum sendes i én besked. Hver måling har sit eget tidsstempel og bruger alias i stedet for navn.</p>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%"><tr><td style="background:#f3f3f3"><pre style="font-family:'Courier New',monospace;font-size:9.5pt;margin:0">{
+  "timestamp": 1792570030000,
+  "seq": 1,
+  "metrics": [
+    { "alias": 1, "timestamp": 1792570010000, "value": 22.9 },
+    { "alias": 1, "timestamp": 1792570020000, "value": 23.0 },
+    { "alias": 1, "timestamp": 1792570030000, "value": 23.1 },
+    { "alias": 2, "timestamp": 1792570030000, "value": -84 }
+  ]
+}</pre></td></tr></table>
+
+<p><b>NCMD fra serveren:</b> ændrer måleintervallet til 15 sekunder uden ny firmware.</p>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%"><tr><td style="background:#f3f3f3"><pre style="font-family:'Courier New',monospace;font-size:9.5pt;margin:0">{
+  "timestamp": 1792570100000,
+  "metrics": [ { "name": "Config/SampleInterval_s", "datatype": "UInt16", "value": 15 } ]
+}</pre></td></tr></table>
+
+<p><b>STATE fra serveren</b> (JSON, sendes med "retain", så klienter, der forbinder senere, ser den med det samme):</p>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%"><tr><td style="background:#f3f3f3"><pre style="font-family:'Courier New',monospace;font-size:9.5pt;margin:0">{ "online": true, "timestamp": 1792569990000 }</pre></td></tr></table>
+
+<h3>Mobilmodemet: M5Stack Stamp CatM</h3>
+<p>Stamp CatM er bygget på SIMCom SIM7080G, som understøtter LTE-M og NB-IoT. Begge er mobilteknologier lavet til IoT-enheder med lavt strøm- og dataforbrug. ESP32-C6'en styrer modemet via UART med AT-kommandoer.</p>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+<tr style="background:#e8e8e8"><th align="left">Zephyr-driver</th><th align="left">Hvordan den virker</th><th align="left">Passer til os?</th></tr>
+<tr><td>Generisk mobildriver (<code>CONFIG_MODEM_CELLULAR</code>)</td><td>Modemet giver ESP32-C6'en en almindelig netværksforbindelse (PPP). Zephyrs egen netværksstak og TLS (mbedTLS) kører på ESP32-C6'en.</td><td><b>Ja.</b> TLS og certifikater styres af vores egen firmware.</td></tr>
+<tr><td>Særlig SIM7080-driver (<code>CONFIG_MODEM_SIM7080</code>)</td><td>Modemet håndterer selv forbindelserne (socket offload). Driveren har også GPS.</td><td><b>Nej.</b> Driveren understøtter ikke TLS.</td></tr>
+</table>
+<p>Begge drivere bruger devicetree-typen <code>simcom,sim7080</code> og kræver en GPIO til at tænde modemet (<code>mdm-power-gpios</code>). APN'et til SIM-kortet sættes med <code>CONFIG_MODEM_CELLULAR_APN</code>. Det har vi tjekket i en Zephyr 3.7-kodebase. Vi skal bekræfte, at det er det samme i Zephyr 4.4.</p>
+
+<h3>Lavt dataforbrug</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+<tr style="background:#e8e8e8"><th align="left">Tiltag</th><th align="left">Hvordan</th></tr>
+<tr><td>Små payloads</td><td>Protobuf er binært og fylder mindre end tilsvarende JSON</td></tr>
+<tr><td>Alias i stedet for navne</td><td>Navnene sendes kun i NBIRTH. NDATA bruger korte tal-alias.</td></tr>
+<tr><td>Kun ændringer</td><td>Sparkplug sender kun målinger, der har ændret sig ("report by exception"). En lille ændring kan regnes som "ingen ændring".</td></tr>
+<tr><td>Samling af målinger (batching)</td><td>Der måles hvert 5.–15. sekund, men flere målinger sendes samlet i én NDATA, hver med sit eget tidsstempel</td></tr>
+<tr><td>Få genforbindelser</td><td>Hver ny TLS-forbindelse koster ekstra data. Forbindelsen holdes derfor åben, eller TLS-sessionen genbruges.</td></tr>
+</table>
+<p>Vi bør måle det faktiske forbrug i bytes pr. time med og uden disse tiltag, og tage tallene med i rapporten.</p>
+
+<h3>Lavt strømforbrug, og konflikten med Sparkplug</h3>
+<p>Sparkplug forventer en vedvarende MQTT-forbindelse, mens lavt strømforbrug kræver, at modem og CPU sover mest muligt. Det skal vi løse bevidst:</p>
+<ul>
+<li><b>CPU:</b> ESP32-C6'en sover mellem målingerne og vækkes af en timer eller et interrupt.</li>
+<li><b>Modem:</b> SIM7080G understøtter LTE-M's strømsparetilstande PSM og eDRX. Modemet sover, men forbliver registreret på nettet, så det ikke skal logge på igen. Den generiske Zephyr-driver slår dem ikke til, så vi skal selv sende AT-kommandoerne (fx <code>AT+CPSMS</code>). Operatøren skal også understøtte dem på vores SIM-kort.</li>
+<li><b>MQTT keep-alive:</b> sættes længere end tiden mellem afsendelser, så mægleren ikke sender NDEATH, mens enheden sover.</li>
+<li><b>Hvis forbindelsen alligevel lukkes:</b> sender ESP32-C6'en selv en NDEATH før den sover og en ny NBIRTH når den vågner. Det koster ekstra data, så det skal kun ske sjældent.</li>
+</ul>
+
+<h3>Sikkerhed (TLS, Cyber Resilience Act og IEC 62443)</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+<tr style="background:#e8e8e8"><th align="left">Tiltag</th><th align="left">Hos os</th></tr>
+<tr><td>Krypteret forbindelse</td><td>MQTT over TLS på port 8883. Port 1883 uden kryptering lukkes på serveren.</td></tr>
+<tr><td>Serveren er ægte</td><td>ESP32-C6'en tjekker serverens certifikat mod vores egen CA ("IIoT Projekt A CA"), som er lagt ind i firmwaren</td></tr>
+<tr><td>Enheden er ægte</td><td>Hver enhed har sit eget login eller klientcertifikat. Ingen fælles eller standard-adgangskoder.</td></tr>
+<tr><td>Mindst mulig adgang</td><td>Regler i Mosquitto (ACL), så <code>esp32c6-a01</code> kun må skrive på sine egne topics og kun læse sine egne NCMD/DCMD</td></tr>
+<tr><td>Sikre opdateringer</td><td>Signeret firmware via MCUboot-bootloaderen, som allerede ligger i vores Zephyr-workspace</td></tr>
+<tr><td>Overvågning</td><td>NDEATH og STATE viser, når enheder eller server falder ud</td></tr>
+</table>
+
+<h3>Hvad hver del skal kunne</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+<tr style="background:#e8e8e8"><th align="left">Del</th><th align="left">Opgave</th><th align="left">Værktøj</th></tr>
+<tr><td>ESP32-C6 (Zephyr)</td><td>Styre Stamp CatM, oprette TLS-forbindelse, sætte Last Will, sende NBIRTH/NDATA, lytte på NCMD, sove mellem målinger</td><td>Den generiske mobildriver (PPP), Zephyrs MQTT-klient, mbedTLS og nanopb til Protobuf (nanopb ligger allerede i vores workspace)</td></tr>
+<tr><td>Mosquitto i Docker</td><td>TLS, login og ACL. Intet Sparkplug-specifikt.</td><td>Den nuværende Docker-opsætning, udvidet med TLS-certifikater</td></tr>
+<tr><td>Dataopsamling</td><td>Sende STATE, afkode Protobuf, gemme og vise data, bede om rebirth</td><td>Fx Node-RED med en Sparkplug-node og en database, eller Python med Eclipse Tahu</td></tr>
+<tr><td>Test-PC med USB-RS485</td><td>Simulere en Modbus-sensor under udvikling</td><td>pymodbus</td></tr>
+</table>
+
+<h3>Næste skridt</h3>
+<ol>
+<li>Rette Mosquitto-konfigurationen og slå TLS til på serveren med vores CA.</li>
+<li>Forbind Stamp CatM til ESP32-C6'en (UART og en GPIO til at tænde modemet), og få den på LTE-M med den generiske mobildriver. Test først med almindelig MQTT og derefter med TLS.</li>
+<li>Skifte til Sparkplug B-beskeder med nanopb, og sætte dataopsamlingen op til at afkode dem.</li>
+<li>Indføre batching og søvn, og måle data- og strømforbrug før og efter.</li>
+<li>Koble en Modbus-sensor på via HW-519 som device bag ESP32-C6'en.</li>
+</ol>
+
+</body></html>

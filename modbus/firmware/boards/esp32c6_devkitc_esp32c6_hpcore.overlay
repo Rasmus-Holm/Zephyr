@@ -1,0 +1,36 @@
+/*
+ * HW-519 TTL<->RS485 på UART1.
+ *
+ *   ESP32-C6 GPIO5 (TX) -> HW-519 TXD
+ *   ESP32-C6 GPIO4 (RX) <- HW-519 RXD
+ *   3V3 -> VCC, GND -> GND   (brug 3.3 V – ESP32-C6 er ikke 5 V-tolerant)
+ *
+ * HW-519 styrer selv sende/modtage-retningen (auto flow control),
+ * så der er ingen DE/RE-pin og derfor ingen de-gpios herunder.
+ */
+#include <zephyr/dt-bindings/pinctrl/esp32c6-pinctrl.h>
+
+&pinctrl {
+	uart1_modbus: uart1_modbus {
+		group1 {
+			pinmux = <UART1_TX_GPIO5>;
+			output-high;
+		};
+		group2 {
+			pinmux = <UART1_RX_GPIO4>;
+			bias-pull-up;
+		};
+	};
+};
+
+&uart1 {
+	status = "okay";
+	current-speed = <9600>;
+	pinctrl-0 = <&uart1_modbus>;
+	pinctrl-names = "default";
+
+	modbus0 {
+		compatible = "zephyr,modbus-serial";
+		status = "okay";
+	};
+};
