@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# _Formål: Byg wifi-tls-no-sparkplugB for én variant (wifi eller modem); flasher og rører ikke hardware.
+# _Formål: Byg firmwaren for én variant (wifi eller modem); flasher og rører ikke hardware.
 # Input: variant som første argument, wifi eller modem; uden argument vælges den i en menu.
 # Output: build-mappen for varianten (build-wifi for wifi, build-cellular for modem).
 set -euo pipefail

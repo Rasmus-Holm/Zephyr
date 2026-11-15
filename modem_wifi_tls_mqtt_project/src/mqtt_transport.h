@@ -6,6 +6,7 @@
 #define MQTT_TRANSPORT_H_
 
 #include <stdbool.h>
+#include <zephyr/net/mqtt.h>
 
 /**
  * @brief Register the MQTT CA certificate in the TLS credential subsystem.
@@ -15,7 +16,17 @@
 int mqtt_transport_tls_init(void);
 
 /**
- * @brief Configure the MQTT client, open TLS connection, and wait for CONNACK.
+ * @brief Configure the MQTT client with optional Last Will, open TLS connection, and wait for CONNACK.
+ *
+ * @param will_topic Optional Last Will topic (e.g. NDEATH), or NULL if not used.
+ * @param will_payload Optional Last Will payload, or NULL if not used.
+ * @param will_qos Last Will QoS (e.g. MQTT_QOS_1_AT_LEAST_ONCE).
+ * @return 0 on success, negative errno on failure or timeout.
+ */
+int mqtt_transport_establish_will(const char *will_topic, const char *will_payload, enum mqtt_qos will_qos);
+
+/**
+ * @brief Backward-compatible establish without Last Will.
  *
  * @return 0 on success, negative errno on failure or timeout.
  */
@@ -33,7 +44,17 @@ int mqtt_transport_establish(void);
 int mqtt_transport_process(int timeout_ms);
 
 /**
- * @brief Publish a null-terminated string payload to the configured MQTT topic.
+ * @brief Publish a null-terminated string payload to a specific MQTT topic with given QoS.
+ *
+ * @param topic MQTT topic string.
+ * @param payload Null-terminated string to publish.
+ * @param qos Quality of Service (MQTT_QOS_0_AT_MOST_ONCE or MQTT_QOS_1_AT_LEAST_ONCE).
+ * @return 0 on success, negative errno on failure.
+ */
+int mqtt_transport_publish_topic(const char *topic, const char *payload, enum mqtt_qos qos);
+
+/**
+ * @brief Publish a null-terminated string payload to the default configured MQTT topic (QoS 0).
  *
  * @param payload Null-terminated string to publish.
  * @return 0 on success, negative errno on failure.

@@ -24,7 +24,7 @@ LOG_MODULE_REGISTER(mqtt_transport);
 #define MQTT_BROKER_PORT 8883
 #define MQTT_CLIENT_ID CONFIG_MQTT_CLIENT_ID
 #define MQTT_TOPIC CONFIG_MQTT_TOPIC
-#define MQTT_BUFFER_SIZE 256
+#define MQTT_BUFFER_SIZE 512
 #define MQTT_CONNECT_TIMEOUT_MS 5000
 #define MQTT_CA_CERT_TAG 1
 
@@ -35,6 +35,14 @@ static struct sockaddr_storage mqtt_broker;
 static struct pollfd mqtt_pollfd;
 static bool mqtt_connected;
 static int mqtt_connect_result;
+static uint16_t mqtt_message_id_counter = 1;
+
+/* Static storage for Last Will to prevent stack corruption.
+ * Zephyr keeps the Last Will topic and its QoS together in struct mqtt_topic. */
+static struct mqtt_topic mqtt_will_topic;
+static struct mqtt_utf8 will_msg_utf8;
+static char static_will_topic[128];
+static char static_will_payload[256];
 
 static sec_tag_t mqtt_sec_tags[] = {MQTT_CA_CERT_TAG};
 
@@ -79,12 +87,22 @@ static void mqtt_event_handler(struct mqtt_client *client, const struct mqtt_evt
 		mqtt_connected = false;
 		LOG_INF("MQTT disconnected: %d", evt->result);
 		break;
+	case MQTT_EVT_PUBACK:
+		if (evt->result == 0)
+		{
+			LOG_INF("MQTT PUBACK received (message id: %u)", evt->param.puback.message_id);
+		}
+		else
+		{
+			LOG_WRN("MQTT PUBACK error: %d", evt->result);
+		}
+		break;
 	default:
 		break;
 	}
 }
 
-static int mqtt_client_setup(void)
+static int mqtt_client_setup(const char *will_topic, const char *will_payload, enum mqtt_qos will_qos)
 {
 	struct sockaddr_in *broker = (struct sockaddr_in *)&mqtt_broker;
 
@@ -108,6 +126,36 @@ static int mqtt_client_setup(void)
 	mqtt_client.tx_buf = mqtt_tx_buffer;
 	mqtt_client.tx_buf_size = sizeof(mqtt_tx_buffer);
 	mqtt_client.transport.type = MQTT_TRANSPORT_SECURE;
+
+	/* Configure Last Will (NDEATH) if provided */
+	if (will_topic && will_payload)
+	{
+		size_t topic_len = strlen(will_topic);
+		size_t payload_len = strlen(will_payload);
+
+		if (topic_len < sizeof(static_will_topic) && payload_len < sizeof(static_will_payload))
+		{
+			memcpy(static_will_topic, will_topic, topic_len + 1);
+			memcpy(static_will_payload, will_payload, payload_len + 1);
+
+			mqtt_will_topic.topic.utf8 = (uint8_t *)static_will_topic;
+			mqtt_will_topic.topic.size = topic_len;
+			mqtt_will_topic.qos = will_qos;
+			will_msg_utf8.utf8 = (uint8_t *)static_will_payload;
+			will_msg_utf8.size = payload_len;
+
+			mqtt_client.will_topic = &mqtt_will_topic;
+			mqtt_client.will_message = &will_msg_utf8;
+			mqtt_client.will_retain = 0;
+			LOG_INF("Configured MQTT Last Will: topic=%s, qos=%d", will_topic, will_qos);
+		}
+		else
+		{
+			LOG_ERR("Last Will topic or payload exceeds buffer size");
+			return -ENOMEM;
+		}
+	}
+
 	struct mqtt_sec_config *tls_config = &mqtt_client.transport.tls.config;
 
 	tls_config->peer_verify = TLS_PEER_VERIFY_REQUIRED;
@@ -120,14 +168,14 @@ static int mqtt_client_setup(void)
 	return 0;
 }
 
-/* Establish the MQTT client and wait for broker acceptance. */
-int mqtt_transport_establish(void)
+/* Establish the MQTT client and wait for broker acceptance with optional Last Will. */
+int mqtt_transport_establish_will(const char *will_topic, const char *will_payload, enum mqtt_qos will_qos)
 {
 	int ret;
 
 	LOG_INF("MQTT setup running");
 
-	ret = mqtt_client_setup();
+	ret = mqtt_client_setup(will_topic, will_payload, will_qos);
 	if (ret < 0)
 	{
 		return ret;
@@ -185,6 +233,11 @@ int mqtt_transport_establish(void)
 	return 0;
 }
 
+int mqtt_transport_establish(void)
+{
+	return mqtt_transport_establish_will(NULL, NULL, MQTT_QOS_0_AT_MOST_ONCE);
+}
+
 int mqtt_transport_process(int timeout_ms)
 {
 	int ret = poll(&mqtt_pollfd, 1, timeout_ms);
@@ -233,39 +286,53 @@ int mqtt_transport_process(int timeout_ms)
 	return 0;
 }
 
-/* Publish one string payload on the established MQTT connection. */
-int mqtt_transport_publish(const char *payload)
+/* Publish one string payload to a specified topic with given QoS. */
+int mqtt_transport_publish_topic(const char *topic, const char *payload, enum mqtt_qos qos)
 {
 	struct mqtt_publish_param publish_param = {0};
 	int ret;
 
-	if (!payload)
+	if (!topic || !payload)
 	{
 		return -EINVAL;
 	}
 
-	publish_param.message.topic.topic.utf8 = (uint8_t *)MQTT_TOPIC;
-	publish_param.message.topic.topic.size = sizeof(MQTT_TOPIC) - 1;
-	publish_param.message.topic.qos = MQTT_QOS_0_AT_MOST_ONCE;
+	publish_param.message.topic.topic.utf8 = (uint8_t *)topic;
+	publish_param.message.topic.topic.size = strlen(topic);
+	publish_param.message.topic.qos = qos;
 	publish_param.message.payload.data = (uint8_t *)payload;
 	publish_param.message.payload.len = strlen(payload);
-	publish_param.message_id = 1;
-
-	LOG_INF("Publishing to mqtt");
-	ret = mqtt_publish(&mqtt_client, &publish_param);
-	if (ret < 0)
+	if (qos > MQTT_QOS_0_AT_MOST_ONCE)
 	{
-		LOG_ERR("MQTT publish failed: %d", ret);
-		LOG_INF("publish failed");
+		if (++mqtt_message_id_counter == 0)
+		{
+			mqtt_message_id_counter = 1;
+		}
+		publish_param.message_id = mqtt_message_id_counter;
 	}
 	else
 	{
-		LOG_INF("MQTT QoS 0 publish accepted locally: topic=%s; broker delivery unverified",
-				MQTT_TOPIC);
-		LOG_INF("Succesfully published");
+		publish_param.message_id = 0;
+	}
+
+	LOG_INF("Publishing to %s (len=%u, qos=%d)", topic, (unsigned int)strlen(payload), qos);
+	ret = mqtt_publish(&mqtt_client, &publish_param);
+	if (ret < 0)
+	{
+		LOG_ERR("MQTT publish failed on %s: %d", topic, ret);
+	}
+	else
+	{
+		LOG_INF("MQTT publish accepted locally: topic=%s, qos=%d", topic, qos);
 	}
 
 	return ret;
+}
+
+/* Publish one string payload on the default configured MQTT topic (QoS 0). */
+int mqtt_transport_publish(const char *payload)
+{
+	return mqtt_transport_publish_topic(MQTT_TOPIC, payload, MQTT_QOS_0_AT_MOST_ONCE);
 }
 
 bool mqtt_transport_is_connected(void)
