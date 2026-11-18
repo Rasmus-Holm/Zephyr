@@ -42,24 +42,24 @@ int modbus_reader_init(void)
 }
 
 /* Read both holding registers; output parameters change only on success. */
-int modbus_reader_read(uint16_t *test_value, uint16_t *uptime_seconds)
+int modbus_reader_read(uint16_t *adc_millivolts, uint16_t *uptime_seconds)
 {
-	uint16_t registers[REGISTER_COUNT];
-	int err;
+	uint16_t register_values[REGISTER_COUNT];
+	int error_code;
 
-	if (test_value == NULL || uptime_seconds == NULL)
+	if (adc_millivolts == NULL || uptime_seconds == NULL)
 	{
 		return -EINVAL;
 	}
 
-	err = modbus_read_holding_regs(client_iface, SLAVE_ID, FIRST_REGISTER, registers,
+	error_code = modbus_read_holding_regs(client_iface, SLAVE_ID, FIRST_REGISTER, register_values,
 					       REGISTER_COUNT);
-	if (err != 0)
+	if (error_code != 0)
 	{
-		return err;
+		return error_code;
 	}
 
-	*test_value = registers[0];
-	*uptime_seconds = registers[1];
+	*adc_millivolts = register_values[0];
+	*uptime_seconds = register_values[1];
 	return 0;
 }

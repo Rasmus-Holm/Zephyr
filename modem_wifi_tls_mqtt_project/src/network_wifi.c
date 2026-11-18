@@ -43,27 +43,27 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt
 	case NET_EVENT_WIFI_CONNECT_RESULT:
 	{
 		struct wifi_status *status = (struct wifi_status *)cb->info;
-		int result = status ? status->status : -ENODATA;
+		int connection_status = status ? status->status : -ENODATA;
 
-		if (result == 0)
+		if (connection_status == 0)
 		{
 			sta_connected = true;
-			LOG_INF("Wi-Fi %s connected (status=%d)", wifi_iface_name(iface), result);
+			LOG_INF("Wi-Fi %s connected (status=%d)", wifi_iface_name(iface), connection_status);
 		}
 		else
 		{
 			sta_connected = false;
-			LOG_ERR("Wi-Fi %s connection failed (status=%d)", wifi_iface_name(iface), result);
+			LOG_ERR("Wi-Fi %s connection failed (status=%d)", wifi_iface_name(iface), connection_status);
 		}
 		break;
 	}
 	case NET_EVENT_WIFI_DISCONNECT_RESULT:
 	{
 		struct wifi_status *status = (struct wifi_status *)cb->info;
-		int result = status ? status->status : -ENODATA;
+		int connection_status = status ? status->status : -ENODATA;
 
 		sta_connected = false;
-		LOG_WRN("Wi-Fi %s disconnected (status=%d)", wifi_iface_name(iface), result);
+		LOG_WRN("Wi-Fi %s disconnected (status=%d)", wifi_iface_name(iface), connection_status);
 		break;
 	}
 	default:
@@ -108,14 +108,14 @@ static int connect_to_wifi(void)
 
 	LOG_INF("Connecting to configured Wi-Fi network");
 
-	int ret = net_mgmt(NET_REQUEST_WIFI_CONNECT, sta_iface, &sta_config,
+	int return_code = net_mgmt(NET_REQUEST_WIFI_CONNECT, sta_iface, &sta_config,
 					   sizeof(struct wifi_connect_req_params));
-	if (ret)
+	if (return_code)
 	{
 		LOG_ERR("Unable to connect to configured Wi-Fi network");
 	}
 
-	return ret;
+	return return_code;
 }
 
 int network_wait_ipv4(int timeout_seconds)

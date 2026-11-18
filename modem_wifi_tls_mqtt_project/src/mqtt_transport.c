@@ -25,7 +25,7 @@ LOG_MODULE_REGISTER(mqtt_transport);
 #define MQTT_CLIENT_ID CONFIG_MQTT_CLIENT_ID
 #define MQTT_TOPIC CONFIG_MQTT_TOPIC
 #define MQTT_BUFFER_SIZE 512
-#define MQTT_CONNECT_TIMEOUT_MS 5000
+#define MQTT_CONNECT_TIMEOUT_MILLISECONDS 5000
 #define MQTT_CA_CERT_TAG 1
 
 static uint8_t mqtt_rx_buffer[MQTT_BUFFER_SIZE];
@@ -48,17 +48,17 @@ static sec_tag_t mqtt_sec_tags[] = {MQTT_CA_CERT_TAG};
 
 int mqtt_transport_tls_init(void)
 {
-	int ret = tls_credential_add(MQTT_CA_CERT_TAG,
+	int return_code = tls_credential_add(MQTT_CA_CERT_TAG,
 					 TLS_CREDENTIAL_CA_CERTIFICATE,
 					 ca_certificate,
 					 sizeof(ca_certificate));
 
-	if (ret < 0)
+	if (return_code < 0)
 	{
-		LOG_ERR("Failed to register MQTT CA certificate: %d", ret);
+		LOG_ERR("Failed to register MQTT CA certificate: %d", return_code);
 	}
 
-	return ret;
+	return return_code;
 }
 
 static void mqtt_event_handler(struct mqtt_client *client, const struct mqtt_evt *evt)
@@ -171,53 +171,53 @@ static int mqtt_client_setup(const char *will_topic, const char *will_payload, e
 /* Establish the MQTT client and wait for broker acceptance with optional Last Will. */
 int mqtt_transport_establish_will(const char *will_topic, const char *will_payload, enum mqtt_qos will_qos)
 {
-	int ret;
+	int return_code;
 
 	LOG_INF("MQTT setup running");
 
-	ret = mqtt_client_setup(will_topic, will_payload, will_qos);
-	if (ret < 0)
+	return_code = mqtt_client_setup(will_topic, will_payload, will_qos);
+	if (return_code < 0)
 	{
-		return ret;
+		return return_code;
 	}
 
 	mqtt_connected = false;
 	mqtt_connect_result = -ETIMEDOUT;
-	ret = mqtt_connect(&mqtt_client);
-	if (ret < 0)
+	return_code = mqtt_connect(&mqtt_client);
+	if (return_code < 0)
 	{
-		LOG_ERR("MQTT connect request failed: %d", ret);
+		LOG_ERR("MQTT connect request failed: %d", return_code);
 		mqtt_abort(&mqtt_client);
-		return ret;
+		return return_code;
 	}
 
 	mqtt_pollfd.fd = mqtt_client.transport.tls.sock;
 	mqtt_pollfd.events = POLLIN;
-	for (int elapsed = 0; elapsed < MQTT_CONNECT_TIMEOUT_MS && !mqtt_connected; elapsed += 100)
+	for (int elapsed = 0; elapsed < MQTT_CONNECT_TIMEOUT_MILLISECONDS && !mqtt_connected; elapsed += 100)
 	{
 		LOG_INF("MQTT connecting...");
 
-		ret = poll(&mqtt_pollfd, 1, 100);
-		if (ret < 0)
+		return_code = poll(&mqtt_pollfd, 1, 100);
+		if (return_code < 0)
 		{
 			LOG_ERR("MQTT poll failed: %d", errno);
 			mqtt_abort(&mqtt_client);
 			return -errno;
 		}
-		if (ret > 0 && (mqtt_pollfd.revents & (POLLERR | POLLHUP | POLLNVAL)))
+		if (return_code > 0 && (mqtt_pollfd.revents & (POLLERR | POLLHUP | POLLNVAL)))
 		{
 			LOG_ERR("MQTT socket error, poll events: 0x%x", mqtt_pollfd.revents);
 			mqtt_abort(&mqtt_client);
 			return -EIO;
 		}
-		if (ret > 0 && (mqtt_pollfd.revents & POLLIN))
+		if (return_code > 0 && (mqtt_pollfd.revents & POLLIN))
 		{
-			ret = mqtt_input(&mqtt_client);
-			if (ret < 0)
+			return_code = mqtt_input(&mqtt_client);
+			if (return_code < 0)
 			{
-				LOG_ERR("MQTT input failed: %d", ret);
+				LOG_ERR("MQTT input failed: %d", return_code);
 				mqtt_abort(&mqtt_client);
-				return ret;
+				return return_code;
 			}
 		}
 	}
@@ -240,9 +240,9 @@ int mqtt_transport_establish(void)
 
 int mqtt_transport_process(int timeout_ms)
 {
-	int ret = poll(&mqtt_pollfd, 1, timeout_ms);
+	int return_code = poll(&mqtt_pollfd, 1, timeout_ms);
 
-	if (ret < 0)
+	if (return_code < 0)
 	{
 		int poll_errno = errno;
 
@@ -252,7 +252,7 @@ int mqtt_transport_process(int timeout_ms)
 		return -poll_errno;
 	}
 
-	if (ret > 0 && (mqtt_pollfd.revents & (POLLERR | POLLHUP | POLLNVAL)))
+	if (return_code > 0 && (mqtt_pollfd.revents & (POLLERR | POLLHUP | POLLNVAL)))
 	{
 		LOG_ERR("MQTT socket error, poll events: 0x%x", mqtt_pollfd.revents);
 		mqtt_abort(&mqtt_client);
@@ -260,26 +260,26 @@ int mqtt_transport_process(int timeout_ms)
 		return -EIO;
 	}
 
-	if (ret > 0 && (mqtt_pollfd.revents & POLLIN))
+	if (return_code > 0 && (mqtt_pollfd.revents & POLLIN))
 	{
-		ret = mqtt_input(&mqtt_client);
-		if (ret < 0)
+		return_code = mqtt_input(&mqtt_client);
+		if (return_code < 0)
 		{
-			LOG_ERR("MQTT input failed: %d", ret);
+			LOG_ERR("MQTT input failed: %d", return_code);
 			mqtt_abort(&mqtt_client);
 			mqtt_connected = false;
-			return ret;
+			return return_code;
 		}
 	}
-	else if (ret == 0)
+	else if (return_code == 0)
 	{
-		ret = mqtt_live(&mqtt_client);
-		if (ret < 0 && ret != -EAGAIN)
+		return_code = mqtt_live(&mqtt_client);
+		if (return_code < 0 && return_code != -EAGAIN)
 		{
-			LOG_ERR("MQTT keepalive failed: %d", ret);
+			LOG_ERR("MQTT keepalive failed: %d", return_code);
 			mqtt_abort(&mqtt_client);
 			mqtt_connected = false;
-			return ret;
+			return return_code;
 		}
 	}
 
@@ -290,7 +290,7 @@ int mqtt_transport_process(int timeout_ms)
 int mqtt_transport_publish_topic(const char *topic, const char *payload, enum mqtt_qos qos)
 {
 	struct mqtt_publish_param publish_param = {0};
-	int ret;
+	int return_code;
 
 	if (!topic || !payload)
 	{
@@ -316,17 +316,17 @@ int mqtt_transport_publish_topic(const char *topic, const char *payload, enum mq
 	}
 
 	LOG_INF("Publishing to %s (len=%u, qos=%d)", topic, (unsigned int)strlen(payload), qos);
-	ret = mqtt_publish(&mqtt_client, &publish_param);
-	if (ret < 0)
+	return_code = mqtt_publish(&mqtt_client, &publish_param);
+	if (return_code < 0)
 	{
-		LOG_ERR("MQTT publish failed on %s: %d", topic, ret);
+		LOG_ERR("MQTT publish failed on %s: %d", topic, return_code);
 	}
 	else
 	{
 		LOG_INF("MQTT publish accepted locally: topic=%s, qos=%d", topic, qos);
 	}
 
-	return ret;
+	return return_code;
 }
 
 /* Publish one string payload on the default configured MQTT topic (QoS 0). */

@@ -39,9 +39,9 @@ static const struct device *const modem = DEVICE_DT_GET(DT_ALIAS(modem));
 static const struct device *const modem_uart = DEVICE_DT_GET(DT_PARENT(DT_ALIAS(modem)));
 /* 3GPP 27.010 basic-mode CLD (close multiplexer) on DLCI 0. */
 static const uint8_t cmux_close_frame[] = {0xF9, 0x03, 0xEF, 0x05, 0xC3, 0x01, 0xF2, 0xF9};
-#define CMUX_CLOSE_SETTLE_MS 500
+#define CMUX_CLOSE_SETTLE_MILLISECONDS 500
 /* Fixed wait for the modem to restart; the driver's init script sends its first AT 11.5 s after boot. */
-#define MODEM_RESTART_WAIT_MS 4000
+#define MODEM_RESTART_WAIT_MILLISECONDS 4000
 static struct net_if *ppp_iface;
 K_EVENT_DEFINE(l4_event);
 
@@ -104,15 +104,15 @@ static void log_registration_progress(void)
 /* Log one text modem field, marking it unknown when the read fails. */
 static void log_modem_info(const char *label, enum cellular_modem_info_type type, size_t length)
 {
-	char value[MODEM_INFO_BUFFER_SIZE] = "-";
+	char info_value[MODEM_INFO_BUFFER_SIZE] = "-";
 
-	if (cellular_get_modem_info(modem, type, value, sizeof(value)) < 0)
+	if (cellular_get_modem_info(modem, type, info_value, sizeof(info_value)) < 0)
 	{
 		LOG_WRN("%s: unknown", label);
 		return;
 	}
 
-	LOG_INF("%s: %.*s", label, (int)length, value);
+	LOG_INF("%s: %.*s", label, (int)length, info_value);
 }
 
 /* Log facts that show which modem, SIM and radio link are in use. Runs once after IP. */
@@ -150,7 +150,7 @@ static void modem_close_stale_cmux(void)
 	}
 
 	/* Let the modem answer, then discard the answer so the driver does not read it. */
-	k_msleep(CMUX_CLOSE_SETTLE_MS);
+	k_msleep(CMUX_CLOSE_SETTLE_MILLISECONDS);
 	while (uart_poll_in(modem_uart, &stale_byte) == 0)
 	{
 	}
@@ -176,13 +176,13 @@ static void modem_reset_module(void)
 {
 	LOG_INF("Resetting the modem module");
 	modem_send_at("AT+CFUN=1,1");
-	k_msleep(MODEM_RESTART_WAIT_MS);
+	k_msleep(MODEM_RESTART_WAIT_MILLISECONDS);
 }
 
 /* Power the modem and bring the PPP interface up. */
 int network_start(void)
 {
-	int ret;
+	int return_code;
 
 	modem_close_stale_cmux();
 	modem_reset_module();
@@ -196,20 +196,20 @@ int network_start(void)
 
 	LOG_INF("Powering on modem");
 	/* The driver resumes itself at boot, so -EALREADY means it is already running. */
-	ret = pm_device_action_run(modem, PM_DEVICE_ACTION_RESUME);
-	if (ret < 0 && ret != -EALREADY)
+	return_code = pm_device_action_run(modem, PM_DEVICE_ACTION_RESUME);
+	if (return_code < 0 && return_code != -EALREADY)
 	{
-		LOG_ERR("Modem resume failed: %d", ret);
-		return ret;
+		LOG_ERR("Modem resume failed: %d", return_code);
+		return return_code;
 	}
 
-	ret = net_if_up(ppp_iface);
-	if (ret < 0)
+	return_code = net_if_up(ppp_iface);
+	if (return_code < 0)
 	{
-		LOG_ERR("PPP interface up failed: %d", ret);
+		LOG_ERR("PPP interface up failed: %d", return_code);
 	}
 
-	return ret;
+	return return_code;
 }
 
 /* True when the PPP link has an IPv4 address. */
@@ -224,10 +224,10 @@ int network_wait_ipv4(int timeout_seconds)
 	for (int waited_seconds = 0; waited_seconds < timeout_seconds;
 		 waited_seconds += NETWORK_POLL_SECONDS)
 	{
-		uint32_t events = k_event_wait(&l4_event, L4_CONNECTED_FLAG, false,
+		uint32_t event_flags = k_event_wait(&l4_event, L4_CONNECTED_FLAG, false,
 									   K_SECONDS(NETWORK_POLL_SECONDS));
 
-		if (events == L4_CONNECTED_FLAG)
+		if (event_flags == L4_CONNECTED_FLAG)
 		{
 			LOG_INF("PPP link up, IP address assigned");
 			log_modem_facts();
@@ -249,32 +249,32 @@ void network_log_status(void)
 /* Open a plain TCP connection to the broker to prove the link before TLS. */
 int network_precheck(void)
 {
-	struct sockaddr_in endpoint = {0};
-	int sock;
-	int ret;
+	struct sockaddr_in broker_endpoint = {0};
+	int socket_descriptor;
+	int return_code;
 	int connect_errno;
 
-	endpoint.sin_family = AF_INET;
-	endpoint.sin_port = htons(MQTT_BROKER_PORT);
-	if (inet_pton(AF_INET, MQTT_BROKER_ADDRESS, &endpoint.sin_addr) != 1)
+	broker_endpoint.sin_family = AF_INET;
+	broker_endpoint.sin_port = htons(MQTT_BROKER_PORT);
+	if (inet_pton(AF_INET, MQTT_BROKER_ADDRESS, &broker_endpoint.sin_addr) != 1)
 	{
 		LOG_ERR("Invalid TCP endpoint address: %s", MQTT_BROKER_ADDRESS);
 		return -EINVAL;
 	}
 
-	sock = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (sock < 0)
+	socket_descriptor = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (socket_descriptor < 0)
 	{
 		LOG_ERR("TCP socket open failed: %d", errno);
 		return -errno;
 	}
 
 	/* Blocking connect; the TCP stack sets the timeout. */
-	ret = zsock_connect(sock, (struct sockaddr *)&endpoint, sizeof(endpoint));
+	return_code = zsock_connect(socket_descriptor, (struct sockaddr *)&broker_endpoint, sizeof(broker_endpoint));
 	/* Keep errno before close, because close may overwrite it. */
 	connect_errno = errno;
-	zsock_close(sock);
-	if (ret < 0)
+	zsock_close(socket_descriptor);
+	if (return_code < 0)
 	{
 		LOG_ERR("TCP connect to %s:%d failed: %d", MQTT_BROKER_ADDRESS, MQTT_BROKER_PORT,
 				connect_errno);
