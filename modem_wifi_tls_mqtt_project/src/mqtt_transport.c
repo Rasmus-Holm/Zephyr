@@ -27,6 +27,9 @@ LOG_MODULE_REGISTER(mqtt_transport);
 #define MQTT_BUFFER_SIZE 256
 #define MQTT_CONNECT_TIMEOUT_MS 5000
 #define MQTT_CA_CERT_TAG 1
+#define MQTT_LE_CA_CERT_TAG 2
+#define MQTT_TLS_HOSTNAME \
+	(sizeof(CONFIG_MQTT_TLS_HOSTNAME) > 1 ? CONFIG_MQTT_TLS_HOSTNAME : MQTT_BROKER_ADDRESS)
 
 static uint8_t mqtt_rx_buffer[MQTT_BUFFER_SIZE];
 static uint8_t mqtt_tx_buffer[MQTT_BUFFER_SIZE];
@@ -36,21 +39,33 @@ static struct pollfd mqtt_pollfd;
 static bool mqtt_connected;
 static int mqtt_connect_result;
 
-static sec_tag_t mqtt_sec_tags[] = {MQTT_CA_CERT_TAG};
+static sec_tag_t mqtt_sec_tags[] = {MQTT_CA_CERT_TAG, MQTT_LE_CA_CERT_TAG};
 
 int mqtt_transport_tls_init(void)
 {
-	int ret = tls_credential_add(MQTT_CA_CERT_TAG,
-					 TLS_CREDENTIAL_CA_CERTIFICATE,
-					 ca_certificate,
-					 sizeof(ca_certificate));
+	int webdock_ret = tls_credential_add(MQTT_CA_CERT_TAG,
+						TLS_CREDENTIAL_CA_CERTIFICATE,
+						ca_certificate,
+						sizeof(ca_certificate));
+	int letsencrypt_ret = tls_credential_add(MQTT_LE_CA_CERT_TAG,
+						TLS_CREDENTIAL_CA_CERTIFICATE,
+						letsencrypt_ca_certificate,
+						sizeof(letsencrypt_ca_certificate));
 
-	if (ret < 0)
+	if (webdock_ret < 0)
 	{
-		LOG_ERR("Failed to register MQTT CA certificate: %d", ret);
+		LOG_ERR("Failed to register Webdock CA certificate: %d", webdock_ret);
+	}
+	if (letsencrypt_ret < 0)
+	{
+		LOG_ERR("Failed to register Let's Encrypt CA certificate: %d", letsencrypt_ret);
+	}
+	if (webdock_ret < 0 && letsencrypt_ret < 0)
+	{
+		return -1;
 	}
 
-	return ret;
+	return 0;
 }
 
 static void mqtt_event_handler(struct mqtt_client *client, const struct mqtt_evt *evt)
@@ -114,8 +129,8 @@ static int mqtt_client_setup(void)
 	tls_config->cipher_list = NULL;
 	tls_config->sec_tag_list = mqtt_sec_tags;
 	tls_config->sec_tag_count = ARRAY_SIZE(mqtt_sec_tags);
-	/* Verify the broker certificate against its IP without sending IP-as-SNI. */
-	tls_config->hostname = MQTT_BROKER_ADDRESS;
+	/* Use the configured DNS name for SNI and certificate verification. */
+	tls_config->hostname = MQTT_TLS_HOSTNAME;
 
 	return 0;
 }

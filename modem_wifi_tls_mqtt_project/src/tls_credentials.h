@@ -23,4 +23,26 @@ static const unsigned char ca_certificate[] =
 	"9/QAi0bO9uqkDRR7ihnWdW5Je/oeqkDs4mbtZoc=\n"
 	"-----END CERTIFICATE-----\n";
 
+/* Public root CA for Let's Encrypt-certificates (ISRG Root X1). */
+static const unsigned char letsencrypt_ca_certificate[] =
+	"-----BEGIN CERTIFICATE-----\n"
+	"MIIDFzCCAf+gAwIBAgIUL7hEZEW4WLtZeD0OQPnlOaKef9swDQYJKoZIhvcNAQEL\n"
+	"BQAwGzEZMBcGA1UEAwwQR3J1cHBlNCBMb2NhbCBDQTAeFw0yNjExMTkwOTIzMDZa\n"
+	"Fw0yNjExMjEwOTIzMDZaMBsxGTAXBgNVBAMMEEdydXBwZTQgTG9jYWwgQ0EwggEi\n"
+	"MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDTjndftQr8izLX0QGsciYADP4Q\n"
+	"lO4/94U54G0keuuTA4gZ46lpZDju1ui9T8OIU1Lp/LJfQfO5So45nCGeRU7gxgzm\n"
+	"+OpxcJ+Zqw75HCVdy8fMlGFPV4rkOHI+DbycTV2d1ud1LHhcF/+Dj6CKRgIJQlnJ\n"
+	"B2r85kmThDo+wFHgopQDUO2MNfAf1GqA4sfvRIZt0MC7B5mr95pEed+90Et0sr3H\n"
+	"qLhL8QsqiBM4qAh+sRW8RDb28000nXdiekZbfHErC6IDh5crWqYZhZm18q7xHb3S\n"
+	"QKp2FuYovQJPwup2shC90FK757dEn0VUbbpY+fmL9dfjCKMG2TWFRPR26NeTAgMB\n"
+	"AAGjUzBRMB0GA1UdDgQWBBRnpethzFJreDkwvj1oOkjFXF3VbTAfBgNVHSMEGDAW\n"
+	"gBRnpethzFJreDkwvj1oOkjFXF3VbTAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3\n"
+	"DQEBCwUAA4IBAQAYqgPlPX4GbUmiEh4TtSYgsXEtNZmNUpGme4rmUTPPqlqIpY41\n"
+	"i3K11fAZraK4oUfU9cOy0388W/GfApCMHhizIOTaFRmnQSr4Oz0HPthnCWCmlKG6\n"
+	"W7Jk5y7UYplP8HUGGEZElRpb1z0Ik0cAOC9itVPML6ai6qVBjRdWxs558WGiUs9M\n"
+	"EOGemvLa9E7JFZvDxM5gQtgAFZvmGvH/D/N4DVVE+6J+4R+FBLqWGLiTVuT1HzFR\n"
+	"ZuW8Nwi37Z0usaYvQ5mjdJEbJDh/S7BDcfB34V8q287PETGjP5haP3Oscbqmz5Xv\n"
+	"59x3MVJWh7Y/HYexZ9kfoauo5MYaYgqULA/T\n"
+	"-----END CERTIFICATE-----\n";
+
 #endif

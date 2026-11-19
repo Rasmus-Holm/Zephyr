@@ -20,12 +20,12 @@ fi
 case "$VARIANT" in
   wifi)
     BUILD_DIR="$PROJECT/build-wifi"
-    CONF_FILES="$PROJECT/wifi.conf;$PROJECT/wifi-local.conf"
+    CONF_FILES="$PROJECT/wifi.conf;$PROJECT/wifi-local.conf;$PROJECT/letsencrypt.conf"
     DTC_OVERLAYS="$PROJECT/modbus-uart0.overlay;$PROJECT/usb.overlay"
     ;;
   modem)
     BUILD_DIR="$PROJECT/build-cellular"
-    CONF_FILES="$PROJECT/cellular.conf;$PROJECT/cellular-local.conf"
+    CONF_FILES="$PROJECT/cellular.conf;$PROJECT/cellular-local.conf;$PROJECT/letsencrypt.conf"
     DTC_OVERLAYS="$PROJECT/modem-uart1.overlay;$PROJECT/modbus-uart0.overlay;$PROJECT/usb.overlay"
     ;;
   *)

@@ -126,7 +126,9 @@ int main(void)
 
 	k_sleep(K_SECONDS(5));
 
+printk("STEP 1: after sleep\n");
 	ret = modbus_reader_init();
+printk("STEP 1b: returned from modbus_reader_init ret=%d\n", ret);
 	if (ret < 0)
 	{
 		LOG_ERR("Modbus client initialization failed: %d; telemetry disabled", ret);
@@ -136,13 +138,16 @@ int main(void)
 		modbus_ready = true;
 		LOG_INF("Modbus RTU client ready; sample interval %d ms", MODBUS_PUBLISH_INTERVAL_MS);
 	}
+printk("STEP 1c: after modbus log\n");
 
+printk("STEP 2: after modbus init\n");
 	if (mqtt_transport_tls_init() < 0)
 	{
 		LOG_ERR("TLS initialization failed");
 		return 0;
 	}
 
+printk("STEP 3: after tls init\n");
 	if (network_start() < 0)
 	{
 		LOG_ERR("Lower network layer failed to start");
@@ -161,8 +166,10 @@ int main(void)
 		}
 	}
 
+printk("STEP 4: after network setup\n");
 	while (true)
 	{
+printk("STEP 5: in loop\n");
 		network_log_status();
 
 		if (mqtt_transport_is_connected())

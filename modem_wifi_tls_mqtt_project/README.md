@@ -18,6 +18,7 @@
     - [1.8.2. Uret over mobilnettet](#182-uret-over-mobilnettet)
     - [1.8.3. Kontrol af certifikatets datoer](#183-kontrol-af-certifikatets-datoer)
   - [1.9. Åbne punkter](#19-åbne-punkter)
+  - [1.10. Let's Encrypt-forsøg](#110-lets-encrypt-forsøg)
 
 Dette er en ESP32-C6/Zephyr test- og udviklingsapplikation til Wi-Fi eller Stamp CatM/cellular og MQTT over TLS uden SparkplugB. Begge netværksvarianter deler TLS-, MQTT- og Modbus-koden. Projektet er samme TLS- og MQTT-spor som `wifi-tls-with-sparkplugB`, men uden protobuf, nanopb, birth/death-payloads og will-message. Det er ikke den færdige Project A-firmware eller fuld cellular acceptance.
 
@@ -173,3 +174,11 @@ Fordi et forkert ur nu stopper TLS, forsøger hovedløkken at sætte uret igen, 
 - Keepalive er aktiv via Zephyrs default `CONFIG_MQTT_KEEPALIVE=60`, og `main.c` kalder `mqtt_live()`, når `poll` timer ud. Gate 7 mangler stadig en observation af PINGREQ/PINGRESP og reconnect mod brokeren.
 - QoS 0-publish giver kun lokal accept. Broker-levering skal ses i en subscriber.
 - Runbooken for Wi-Fi/TLS-routen ligger i workspace (`wifi-tls-reproduction-runbook_linux.md`), og ikke i projektmappen.
+
+## 1.10. Let's Encrypt-forsøg
+
+Dette er et eksperiment på branchen `nikolaj/encryption-test`, ikke en ændring af den oprindelige opsætning. Brokeren skal have et Let's Encrypt-certifikat for navnet i `CONFIG_MQTT_TLS_HOSTNAME` (`Gruppe4` i forsøget). Firmwaren sender navnet som SNI og verificerer certifikatets DNS-SAN mod det. `CONFIG_MQTT_BROKER_ADDRESS` forbliver en IPv4-adresse, fordi `inet_pton()` og modemets TCP-precheck bruger den.
+
+Begge CA'er registreres: den hidtidige Webdock-CA (sec-tag 1) og ISRG Root X1 (sec-tag 2). Fælles `prj.conf` slår `CONFIG_MBEDTLS_HAVE_TIME_DATE=y` til, så LE-certifikaters korte gyldighed kontrolleres i begge netværksvarianter. `letsencrypt.conf` indlæses af begge build-scripts; fjern den fra `CONF_FILES` for at vende tilbage til Webdock-IP-SAN-ruten uden SNI.
+
+`Gruppe4` er et testnavn. Før forsøget kan give CONNACK, skal det erstattes af et rigtigt DNS-navn, som brokeren har fået et LE-certifikat for, og brokerens kæde skal sendes af Mosquitto.
