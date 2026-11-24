@@ -25,7 +25,6 @@ LOG_MODULE_REGISTER(mqtt_transport);
 #define MQTT_CLIENT_ID CONFIG_MQTT_CLIENT_ID
 #define MQTT_USERNAME CONFIG_MQTT_USERNAME
 #define MQTT_PASSWORD CONFIG_MQTT_PASSWORD
-#define MQTT_TOPIC CONFIG_MQTT_TOPIC
 #define MQTT_BUFFER_SIZE 512
 #define MQTT_CONNECT_TIMEOUT_MILLISECONDS 5000
 #define MQTT_CA_CERT_TAG 1
@@ -353,12 +352,6 @@ int mqtt_transport_publish_topic(const char *topic, const char *payload, enum mq
 	}
 
 	return return_code;
-}
-
-/* Publish one string payload on the default configured MQTT topic (QoS 0). */
-int mqtt_transport_publish(const char *payload)
-{
-	return mqtt_transport_publish_topic(MQTT_TOPIC, payload, MQTT_QOS_0_AT_MOST_ONCE);
 }
 
 bool mqtt_transport_is_connected(void)

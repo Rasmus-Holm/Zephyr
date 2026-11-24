@@ -54,14 +54,6 @@ int mqtt_transport_process(int timeout_ms);
 int mqtt_transport_publish_topic(const char *topic, const char *payload, enum mqtt_qos qos);
 
 /**
- * @brief Publish a null-terminated string payload to the default configured MQTT topic (QoS 0).
- *
- * @param payload Null-terminated string to publish.
- * @return 0 on success, negative errno on failure.
- */
-int mqtt_transport_publish(const char *payload);
-
-/**
  * @brief Check whether the MQTT client currently has an active connection.
  *
  * @return true if connected, false otherwise.

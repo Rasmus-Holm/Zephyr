@@ -50,10 +50,6 @@ config MQTT_PASSWORD
 	help
 	  Password sent in the MQTT CONNECT message. Needs a user name.
 
-config MQTT_TOPIC
-	string "MQTT test topic"
-	default "iot/test"
-
 config MQTT_SNTP_SERVER
 	string "SNTP server name or IPv4 address"
 	default "pool.ntp.org"

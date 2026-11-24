@@ -53,7 +53,6 @@ CONFIG_WIFI_SAMPLE_SSID="..."
 CONFIG_WIFI_SAMPLE_PSK="..."
 CONFIG_MQTT_BROKER_ADDRESS="..."
 CONFIG_MQTT_CLIENT_ID="..."
-CONFIG_MQTT_TOPIC="..."
 ```
 
 Firmware bruger disse værdier direkte via Zephyr Kconfig. `CONFIG_MQTT_BROKER_ADDRESS` skal være en IPv4-adresse, fordi `main.c` bruger `inet_pton`. `src/tls_credentials.h` skal indeholde den offentlige CA, der signer brokerens servercertifikat. CA-private keys, servercertifikaternes private keys og MQTT-passwords må aldrig kopieres hertil.
@@ -127,7 +126,7 @@ Build-forskelle:
 - Wi-Fi: `-DEXTRA_CONF_FILE="<projekt>/wifi.conf;<projekt>/wifi-local.conf"` og `-DEXTRA_DTC_OVERLAY_FILE="<projekt>/modbus-uart0.overlay;<projekt>/usb.overlay"`, ud over `prj.conf`.
 - Modem: `-DEXTRA_CONF_FILE="<projekt>/cellular.conf;<projekt>/cellular-local.conf"` og `-DEXTRA_DTC_OVERLAY_FILE="<projekt>/modem-uart1.overlay;<projekt>/modbus-uart0.overlay;<projekt>/usb.overlay"`. `wifi.conf` og `wifi-local.conf` indlæses ikke, så Wi-Fi-credentials ikke kommer med i modem-buildet.
 
-Den committede fil `cellular-local.conf` indeholder kun `CONFIG_MQTT_BROKER_ADDRESS`, `CONFIG_MQTT_CLIENT_ID` og `CONFIG_MQTT_TOPIC`. SSID og PSK står ikke i den.
+Den committede fil `cellular-local.conf` indeholder kun `CONFIG_MQTT_BROKER_ADDRESS`, og `CONFIG_MQTT_CLIENT_ID`. SSID og PSK står ikke i den.
 
 Modemet ligger på `uart1` med TX på GPIO18 og RX på GPIO19. Modbus-klienten bruger fælles `uart0` på GPIO22 TX og GPIO23 RX via `modbus-uart0.overlay`; USB Serial/JTAG er fortsat konsol. `cellular.conf` sætter `CONFIG_MODEM_CMUX_WORK_BUFFER_SIZE_EXTRA=512`. Det er en testværdi. Standardbufferen gav `DLCI 1 receive buffer overrun` under TLS og MQTT.
 
