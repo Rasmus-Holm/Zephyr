@@ -23,6 +23,8 @@ LOG_MODULE_REGISTER(mqtt_transport);
 #define MQTT_BROKER_ADDRESS CONFIG_MQTT_BROKER_ADDRESS
 #define MQTT_BROKER_PORT 8883
 #define MQTT_CLIENT_ID CONFIG_MQTT_CLIENT_ID
+#define MQTT_USERNAME CONFIG_MQTT_USERNAME
+#define MQTT_PASSWORD CONFIG_MQTT_PASSWORD
 #define MQTT_TOPIC CONFIG_MQTT_TOPIC
 #define MQTT_BUFFER_SIZE 512
 #define MQTT_CONNECT_TIMEOUT_MILLISECONDS 5000
@@ -31,6 +33,9 @@ LOG_MODULE_REGISTER(mqtt_transport);
 static uint8_t mqtt_rx_buffer[MQTT_BUFFER_SIZE];
 static uint8_t mqtt_tx_buffer[MQTT_BUFFER_SIZE];
 static struct mqtt_client mqtt_client;
+/* Login sent in the MQTT CONNECT message; the client keeps pointers to these. */
+static struct mqtt_utf8 mqtt_username_utf8;
+static struct mqtt_utf8 mqtt_password_utf8;
 static struct sockaddr_storage mqtt_broker;
 static struct pollfd mqtt_pollfd;
 static bool mqtt_connected;
@@ -126,6 +131,27 @@ static int mqtt_client_setup(const char *will_topic, const char *will_payload, e
 	mqtt_client.tx_buf = mqtt_tx_buffer;
 	mqtt_client.tx_buf_size = sizeof(mqtt_tx_buffer);
 	mqtt_client.transport.type = MQTT_TRANSPORT_SECURE;
+
+	/* Send a login only when a user name is configured; Zephyr requires a user name with a password. */
+	if (sizeof(MQTT_USERNAME) > 1)
+	{
+		mqtt_username_utf8.utf8 = (const uint8_t *)MQTT_USERNAME;
+		mqtt_username_utf8.size = sizeof(MQTT_USERNAME) - 1;
+		mqtt_client.user_name = &mqtt_username_utf8;
+
+		if (sizeof(MQTT_PASSWORD) > 1)
+		{
+			mqtt_password_utf8.utf8 = (const uint8_t *)MQTT_PASSWORD;
+			mqtt_password_utf8.size = sizeof(MQTT_PASSWORD) - 1;
+			mqtt_client.password = &mqtt_password_utf8;
+		}
+		LOG_INF("MQTT login configured for user %s", MQTT_USERNAME);
+	}
+	else if (sizeof(MQTT_PASSWORD) > 1)
+	{
+		LOG_ERR("MQTT password is set without a user name");
+		return -EINVAL;
+	}
 
 	/* Configure Last Will (NDEATH) if provided */
 	if (will_topic && will_payload)

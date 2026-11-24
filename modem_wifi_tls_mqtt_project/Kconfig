@@ -36,7 +36,19 @@ config MQTT_BROKER_ADDRESS
 
 config MQTT_CLIENT_ID
 	string "MQTT client ID"
-	default "esp32c6-wifi-tls"
+	default "esp32c6-node01"
+
+config MQTT_USERNAME
+	string "MQTT broker user name"
+	default ""
+	help
+	  User name sent in the MQTT CONNECT message. Empty means no login.
+
+config MQTT_PASSWORD
+	string "MQTT broker password"
+	default ""
+	help
+	  Password sent in the MQTT CONNECT message. Needs a user name.
 
 config MQTT_TOPIC
 	string "MQTT test topic"

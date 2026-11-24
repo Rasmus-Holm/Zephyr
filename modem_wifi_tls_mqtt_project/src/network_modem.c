@@ -32,6 +32,7 @@ LOG_MODULE_REGISTER(network_modem, CONFIG_NET_CONNECTION_MANAGER_LOG_LEVEL);
 #define L4_CONNECTED_FLAG 1
 #define NETWORK_POLL_SECONDS 5
 #define MODEM_INFO_BUFFER_SIZE 64
+#define SIGNAL_LOG_INTERVAL_SECONDS 30
 /* Onomondo ICCIDs start with this prefix; only the prefix is logged. */
 #define ICCID_PREFIX_LENGTH 6
 
@@ -241,9 +242,60 @@ int network_wait_ipv4(int timeout_seconds)
 	return -ETIMEDOUT;
 }
 
+/* Short reason for a failed signal read, so the log line needs no errno lookup. */
+static const char *signal_error_text(int return_code)
+{
+	switch (return_code)
+	{
+	case -EBUSY:
+		return "modem busy, retrying";
+	case -ENODATA:
+		return "not registered yet";
+	case -EAGAIN:
+		return "AT+CSQ timed out";
+	case -EINVAL:
+		return "modem reports no signal";
+	default:
+		return "read failed";
+	}
+}
+
+/*
+ * Log the RSSI at most every SIGNAL_LOG_INTERVAL_SECONDS. The read runs AT+CSQ in the driver's
+ * chat context, which also runs the periodic script, so it blocks up to 2 s and returns -EBUSY
+ * while that script runs. A failed read counts toward the driver's script failure limit.
+ */
+static void log_signal_strength(void)
+{
+	static int64_t next_log_milliseconds;
+	int16_t rssi_dbm = 0;
+	int return_code;
+
+	if (k_uptime_get() < next_log_milliseconds)
+	{
+		return;
+	}
+	next_log_milliseconds = k_uptime_get() + (int64_t)SIGNAL_LOG_INTERVAL_SECONDS * MSEC_PER_SEC;
+
+	return_code = cellular_get_signal(modem, CELLULAR_SIGNAL_RSSI, &rssi_dbm);
+	if (return_code == 0)
+	{
+		LOG_INF("Signal strength: RSSI %d dBm", rssi_dbm);
+	}
+	else if (return_code == -EBUSY)
+	{
+		LOG_INF("Signal strength not read: %s (%d)", signal_error_text(return_code), return_code);
+	}
+	else
+	{
+		LOG_WRN("Signal strength not read: %s (%d)", signal_error_text(return_code), return_code);
+	}
+}
+
 void network_log_status(void)
 {
 	LOG_INF("PPP status: %s", network_has_ipv4() ? "IP assigned" : "no IP");
+	log_signal_strength();
 }
 
 /* Open a plain TCP connection to the broker to prove the link before TLS. */
