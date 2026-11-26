@@ -58,4 +58,13 @@ config NETWORK_IPV4_TIMEOUT_SECONDS
 	int "Seconds to wait for an IPv4 address"
 	default 30
 
+config APP_BATCH_SIZE
+	int "Number of Modbus samples per MQTT message"
+	default 5
+	range 1 30
+	help
+	  Number of samples collected before sending one NDATA message as a batch.
+	  1 sends one message per sample (still using array format). Higher values
+	  reduce transmissions but delay delivery of older samples.
+
 source "Kconfig.zephyr"

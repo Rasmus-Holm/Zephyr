@@ -14,19 +14,30 @@
 #include <zephyr/sys/clock.h>
 
 #include <errno.h>
+#include <stdarg.h>
 #include <time.h>
 
 LOG_MODULE_REGISTER(MAIN);
 
 #define MQTT_SNTP_SERVER CONFIG_MQTT_SNTP_SERVER
 #define MODBUS_PUBLISH_INTERVAL_MILLISECONDS 5000
-#define MODBUS_PAYLOAD_BUFFER_SIZE 256
+#define MODBUS_PAYLOAD_BUFFER_SIZE 1536
+#define BATCH_SIZE CONFIG_APP_BATCH_SIZE
 
 #define SPB_GROUP_ID "UCL"
 #define SPB_EDGE_NODE_ID CONFIG_MQTT_CLIENT_ID
 #define SPB_TOPIC_NBIRTH "spBv1.0/" SPB_GROUP_ID "/NBIRTH/" SPB_EDGE_NODE_ID
 #define SPB_TOPIC_NDATA "spBv1.0/" SPB_GROUP_ID "/NDATA/" SPB_EDGE_NODE_ID
 #define SPB_TOPIC_NDEATH "spBv1.0/" SPB_GROUP_ID "/NDEATH/" SPB_EDGE_NODE_ID
+
+struct modbus_sample {
+	uint64_t timestamp_ms;
+	uint16_t adc_millivolts;
+	uint16_t uptime_seconds;
+};
+
+static struct modbus_sample sample_batch[BATCH_SIZE];
+static uint8_t batch_count;
 
 /* False after a failed pre-TLS network check, so no TLS or MQTT is attempted on that link. */
 static bool mqtt_allowed = true;
@@ -141,13 +152,129 @@ static int publish_spb_birth(void)
 	return return_code;
 }
 
-/* Read the RTU values and publish them as Sparkplug B NDATA JSON; the ADC value is not range checked. */
-static int publish_modbus_uptime(void)
+/* Append a formatted fragment to the JSON buffer; returns 0 or negative on error/truncation. */
+static int payload_append(char *buffer, size_t buffer_size, int *offset, const char *fmt, ...)
+{
+	va_list args;
+	int written;
+
+	va_start(args, fmt);
+	written = vsnprintk(buffer + *offset, buffer_size - *offset, fmt, args);
+	va_end(args);
+
+	if (written < 0 || (size_t)written >= (buffer_size - *offset))
+	{
+		return -EMSGSIZE;
+	}
+
+	*offset += written;
+	return 0;
+}
+
+/* Publish the collected batch as one Sparkplug B NDATA JSON message (format A: parallel arrays). */
+static int publish_batch(void)
 {
 	char payload_json[MODBUS_PAYLOAD_BUFFER_SIZE];
+	int offset = 0;
+	int return_code;
+
+	if (batch_count < BATCH_SIZE)
+	{
+		return 0;
+	}
+
+	return_code = payload_append(payload_json, sizeof(payload_json), &offset,
+				     "{\"timestamp\":%llu,\"device_id\":\"%s\",\"seq\":%u,\"metrics\":["
+				     "{\"name\":\"sample_timestamps\",\"value\":[",
+				     (unsigned long long)sample_batch[batch_count - 1].timestamp_ms,
+				     SPB_EDGE_NODE_ID,
+				     spb_seq);
+	if (return_code < 0)
+	{
+		goto truncated;
+	}
+
+	for (uint8_t i = 0; i < batch_count; i++)
+	{
+		return_code = payload_append(payload_json, sizeof(payload_json), &offset, "%s%llu",
+					     (i == 0) ? "" : ",",
+					     (unsigned long long)sample_batch[i].timestamp_ms);
+		if (return_code < 0)
+		{
+			goto truncated;
+		}
+	}
+
+	return_code = payload_append(payload_json, sizeof(payload_json), &offset,
+				     "]},{\"name\":\"adc_millivolts\",\"value\":[");
+	if (return_code < 0)
+	{
+		goto truncated;
+	}
+
+	for (uint8_t i = 0; i < batch_count; i++)
+	{
+		return_code = payload_append(payload_json, sizeof(payload_json), &offset, "%s%u",
+					     (i == 0) ? "" : ",",
+					     sample_batch[i].adc_millivolts);
+		if (return_code < 0)
+		{
+			goto truncated;
+		}
+	}
+
+	return_code = payload_append(payload_json, sizeof(payload_json), &offset,
+				     "]},{\"name\":\"uptime_seconds\",\"value\":[");
+	if (return_code < 0)
+	{
+		goto truncated;
+	}
+
+	for (uint8_t i = 0; i < batch_count; i++)
+	{
+		return_code = payload_append(payload_json, sizeof(payload_json), &offset, "%s%u",
+					     (i == 0) ? "" : ",",
+					     sample_batch[i].uptime_seconds);
+		if (return_code < 0)
+		{
+			goto truncated;
+		}
+	}
+
+	return_code = payload_append(payload_json, sizeof(payload_json), &offset, "]}]}");
+	if (return_code < 0)
+	{
+		goto truncated;
+	}
+
+	return_code = mqtt_transport_publish_topic(SPB_TOPIC_NDATA, payload_json, MQTT_QOS_0_AT_MOST_ONCE);
+	if (return_code < 0)
+	{
+		LOG_ERR("MQTT batch publish failed: %d; discarding batch for newer data", return_code);
+		batch_count = 0;
+		return return_code;
+	}
+
+	spb_seq = (spb_seq + 1) & 0xFF;
+	batch_count = 0;
+	LOG_INF("Published batched NDATA with %u samples", BATCH_SIZE);
+	return 0;
+
+truncated:
+	LOG_ERR("Sparkplug NDATA payload formatting failed/truncated");
+	/* Discard to prioritize newer data over an unsendable old batch. */
+	batch_count = 0;
+	return -EMSGSIZE;
+}
+
+/* Read one Modbus sample, collect into a batch, and publish when BATCH_SIZE samples are ready.
+ * Newer data is prioritized: on publish failure or when a full unsent batch would block a new
+ * sample, the old batch is discarded.
+ */
+static int sample_and_publish_modbus(void)
+{
 	uint16_t adc_millivolts;
 	uint16_t uptime_seconds;
-	uint64_t now_ms;
 	int return_code;
 
 	return_code = modbus_reader_read(&adc_millivolts, &uptime_seconds);
@@ -157,30 +284,26 @@ static int publish_modbus_uptime(void)
 		return return_code;
 	}
 
-	LOG_INF("Modbus sample: adc = %u mV, uptime = %u s", adc_millivolts, uptime_seconds);
-
-	now_ms = get_posix_timestamp_ms();
-
-	/* Format NDATA payload with device_id, Unix ms timestamp, seq and metrics */
-	return_code = snprintk(payload_json, sizeof(payload_json),
-		       "{\"timestamp\":%llu,\"device_id\":\"%s\",\"seq\":%u,\"metrics\":["
-		       "{\"name\":\"adc_millivolts\",\"value\":%u},"
-		       "{\"name\":\"uptime_seconds\",\"value\":%u}]}",
-		       (unsigned long long)now_ms,
-		       SPB_EDGE_NODE_ID,
-		       spb_seq,
-		       adc_millivolts,
-		       uptime_seconds);
-	if (return_code < 0 || return_code >= sizeof(payload_json))
+	if (batch_count >= BATCH_SIZE)
 	{
-		LOG_ERR("Sparkplug NDATA payload formatting failed: %d", return_code);
-		return -EMSGSIZE;
+		LOG_WRN("Discarding unsent batch to prioritize newer sample");
+		batch_count = 0;
 	}
 
-	/* Sequence counter increments 0..255 and wraps around */
-	spb_seq = (spb_seq + 1) & 0xFF;
+	sample_batch[batch_count].timestamp_ms = get_posix_timestamp_ms();
+	sample_batch[batch_count].adc_millivolts = adc_millivolts;
+	sample_batch[batch_count].uptime_seconds = uptime_seconds;
+	batch_count++;
 
-	return mqtt_transport_publish_topic(SPB_TOPIC_NDATA, payload_json, MQTT_QOS_0_AT_MOST_ONCE);
+	LOG_INF("Modbus sample: adc = %u mV, uptime = %u s (%u/%u)", adc_millivolts, uptime_seconds,
+		batch_count, BATCH_SIZE);
+
+	if (batch_count == BATCH_SIZE)
+	{
+		return publish_batch();
+	}
+
+	return 0;
 }
 
 static int establish_mqtt_connection(void)
@@ -289,7 +412,7 @@ int main(void)
 		if (mqtt_transport_is_connected() && modbus_ready &&
 		    k_uptime_get() >= next_modbus_publish_ms)
 		{
-			publish_modbus_uptime();
+			sample_and_publish_modbus();
 			next_modbus_publish_ms = k_uptime_get() + MODBUS_PUBLISH_INTERVAL_MILLISECONDS;
 		}
 	}

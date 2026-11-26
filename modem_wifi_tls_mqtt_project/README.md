@@ -17,7 +17,8 @@
     - [1.8.1. Opstartsoprydning af modemet](#181-opstartsoprydning-af-modemet)
     - [1.8.2. Uret over mobilnettet](#182-uret-over-mobilnettet)
     - [1.8.3. Kontrol af certifikatets datoer](#183-kontrol-af-certifikatets-datoer)
-  - [1.9. Åbne punkter](#19-åbne-punkter)
+  - [1.9. NDATA batching (test/power-batching)](#19-ndata-batching-testpower-batching)
+  - [1.10. Åbne punkter](#110-åbne-punkter)
 
 Dette er en ESP32-C6/Zephyr test- og udviklingsapplikation til Wi-Fi eller Stamp CatM/cellular og MQTT over TLS uden SparkplugB. Begge netværksvarianter deler TLS-, MQTT- og Modbus-koden. Projektet er samme TLS- og MQTT-spor som `wifi-tls-with-sparkplugB`, men uden protobuf, nanopb, birth/death-payloads og will-message. Det er ikke den færdige Project A-firmware eller fuld cellular acceptance.
 
@@ -30,14 +31,14 @@ Den testede SparkplugB-version ligger i `zephyr-projects/_iot-project-tests/wifi
 ## 1.3. Pipeline
 
 ```text
-Wi-Fi
-    -> DHCP
+Wi-Fi/cellular
+    -> DHCP/PPP
     -> SNTP mod pool.ntp.org, så certifikatet kan valideres
     -> TCP 8883
     -> TLS 1.2 med public CA og IP-SAN, uden SNI
-    -> MQTT 3.1.1 CONNECT og CONNACK
-    -> Modbus RTU register 1 læses hvert 10. sekund
-    -> QoS 0 publish af `payload N` til CONFIG_MQTT_TOPIC
+    -> MQTT 3.1.1 CONNECT og CONNACK + Sparkplug B NBIRTH
+    -> Modbus RTU samples hvert 5. sekund
+    -> Hver APP_BATCH_SIZE samples: QoS 0 NDATA batch til spBv1.0/UCL/NDATA/<CONFIG_MQTT_CLIENT_ID>
 ```
 
 Firmwaren forbinder til brokeren i den adresse, der står i `CONFIG_MQTT_BROKER_ADDRESS`. Den offentlige CA i `src/tls_credentials.h` er identisk med CA'en i `wifi-tls-with-sparkplugB`, og den aktive konfiguration i `wifi-local.conf` peger på Webdock-brokeren `92.113.144.124`.
@@ -162,7 +163,76 @@ Før stod `CONFIG_MBEDTLS_HAVE_TIME_DATE` slået fra, og TLS kontrollerede da ik
 
 Fordi et forkert ur nu stopper TLS, forsøger hovedløkken at sætte uret igen, før den prøver MQTT, og den starter ikke TLS, så længe uret ikke er sat. `CONFIG_MQTT_SNTP_SERVER` vælger tidsserveren, med `pool.ntp.org` som standard.
 
-## 1.9. Åbne punkter
+## 1.9. NDATA batching (test/power-batching)
+
+Denne branch tilføjer simpel applikations-batching af Modbus-samples før MQTT-publish, som en power-savings test på samme Sparkplug B JSON-flow som `main`.
+
+### Konfiguration
+
+- `CONFIG_APP_BATCH_SIZE` i `modem_wifi_tls_mqtt_project/Kconfig`: antal samples pr. NDATA-besked.
+- Default: `5`. Range: `1..30`.
+- `APP_BATCH_SIZE=1` sender én besked pr. sample, stadig i array-format med længde 1.
+
+Eksempel i en conf-fil eller som build-override:
+
+```conf
+CONFIG_APP_BATCH_SIZE=5
+```
+
+### Opførsel
+
+- Firmwaren læser Modbus hvert `MODBUS_PUBLISH_INTERVAL_MILLISECONDS` (5000 ms) og gemmer et sample i en RAM-batch: `timestamp_ms`, `adc_millivolts`, `uptime_seconds`.
+- Når `batch_count == APP_BATCH_SIZE`, sendes én Sparkplug B NDATA til `spBv1.0/UCL/NDATA/<CONFIG_MQTT_CLIENT_ID>` med QoS 0.
+- `seq` tælles kun op ved vellykket batch-publish. NBIRTH/NDEATH/bdSeq/reconnect-flow er uændret.
+- Nyeste data prioriteres: hvis en batch-publish fejler, payload formateres/trunkeres, eller en fuld usendt batch ville blokere et nyt sample, droppes den gamle batch (`batch_count=0`), og nye samples samles. Der forsøges ikke at gensende gamle data.
+- Modbus-læsefejl bevarer den delvise batch.
+
+### Payload-format (format A, parallelle arrays)
+
+Top-level `timestamp` er timestamp for sidste sample i batchen. Metrikkerne er parallelle arrays med samme længde og indeks:
+
+```json
+{
+  "timestamp": 1710000000000,
+  "device_id": "esp32c6-wifi-tls",
+  "seq": 7,
+  "metrics": [
+    {"name": "sample_timestamps", "value": [1709999980000, 1709999985000, 1709999990000, 1709999995000, 1710000000000]},
+    {"name": "adc_millivolts", "value": [3150, 3148, 3151, 3149, 3150]},
+    {"name": "uptime_seconds", "value": [100, 105, 110, 115, 120]}
+  ]
+}
+```
+
+### Build og test
+
+Byg fra Zephyr workspace med aktiveret venv (samme variantvalg som ellers):
+
+```bash
+cd ~/zephyrproject
+source .venv/bin/activate
+west build -p always -b esp32c6_devkitc/esp32c6/hpcore -S espressif-flash-4M \
+  -d /home/rasmus/Desktop/Zephyr/modem_wifi_tls_mqtt_project/build-wifi \
+  /home/rasmus/Desktop/Zephyr/modem_wifi_tls_mqtt_project -- \
+  "-DEXTRA_CONF_FILE=/home/rasmus/Desktop/Zephyr/modem_wifi_tls_mqtt_project/wifi.conf;/home/rasmus/Desktop/Zephyr/modem_wifi_tls_mqtt_project/wifi-local.conf" \
+  "-DEXTRA_DTC_OVERLAY_FILE=/home/rasmus/Desktop/Zephyr/modem_wifi_tls_mqtt_project/modbus-uart0.overlay;/home/rasmus/Desktop/Zephyr/modem_wifi_tls_mqtt_project/usb.overlay"
+```
+
+For modem/cellular bruges `build-cellular`, `cellular.conf;cellular-local.conf` og `modem-uart1.overlay;modbus-uart0.overlay;usb.overlay`.
+
+Forventet log ved batching:
+
+```text
+<inf> MAIN: Modbus sample: adc = 3150 mV, uptime = 120 s (1/5)
+...
+<inf> MAIN: Modbus sample: adc = 3150 mV, uptime = 140 s (5/5)
+<inf> mqtt_transport: Publishing to spBv1.0/UCL/NDATA/... (len=..., qos=0)
+<inf> MAIN: Published batched NDATA with 5 samples
+```
+
+Verificering: `build-wifi` med `APP_BATCH_SIZE=5` er bygget/flashet og viste flere på hinanden følgende 5-sample batches over Wi-Fi/MQTT. `build-cellular` med `APP_BATCH_SIZE=5` er bygget; end-to-end modem-batching blev ikke verificeret i denne session pga. ustabil modem-registrering/port. Payload-indhold på broker og PPK2-målinger er ikke verificeret her.
+
+## 1.10. Åbne punkter
 
 - Modem: Navneopslag over PPP tog 3,6 til 5,3 sekunder i fire af seks kørsler. Årsagen til de langsomme svar er ikke undersøgt.
 - Datokontrollen er afprøvet med et ur, der ikke er sat, men ikke med et certifikat, der rent faktisk er udløbet. Wi-Fi-varianten har ikke fået datokontrollen slået til.
@@ -172,4 +242,5 @@ Fordi et forkert ur nu stopper TLS, forsøger hovedløkken at sætte uret igen, 
 - Modem: Enkelte kørsler viser `periodic_chat_script: timed out` fra driveren (2 af 6 kørsler med opstartsoprydning). Sammenhæng med nulstillingen er ikke undersøgt.
 - Keepalive er aktiv via Zephyrs default `CONFIG_MQTT_KEEPALIVE=60`, og `main.c` kalder `mqtt_live()`, når `poll` timer ud. Gate 7 mangler stadig en observation af PINGREQ/PINGRESP og reconnect mod brokeren.
 - QoS 0-publish giver kun lokal accept. Broker-levering skal ses i en subscriber.
+- Batching: broker-payload, PPK2-strømmåling og end-to-end modem/cellular med batching er ikke verificeret.
 - Runbooken for Wi-Fi/TLS-routen ligger i workspace (`wifi-tls-reproduction-runbook_linux.md`), og ikke i projektmappen.
