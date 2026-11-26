@@ -19,8 +19,15 @@
 LOG_MODULE_REGISTER(MAIN);
 
 #define MQTT_SNTP_SERVER CONFIG_MQTT_SNTP_SERVER
-#define MODBUS_PUBLISH_INTERVAL_MILLISECONDS 5000
+/* Modbus is read at the sample interval; the buffered samples are published together at the batch interval. */
+#define MODBUS_SAMPLE_INTERVAL_MILLISECONDS 5000
+/* Set equal to the sample interval to publish every sample at once, as before batching. */
+#define BATCH_PUBLISH_INTERVAL_MILLISECONDS 30000
+#define BATCH_SAMPLE_CAPACITY (BATCH_PUBLISH_INTERVAL_MILLISECONDS / MODBUS_SAMPLE_INTERVAL_MILLISECONDS)
 #define MODBUS_PAYLOAD_BUFFER_SIZE 256
+
+BUILD_ASSERT(BATCH_PUBLISH_INTERVAL_MILLISECONDS % MODBUS_SAMPLE_INTERVAL_MILLISECONDS == 0 && BATCH_SAMPLE_CAPACITY >= 1,
+	     "The batch interval must be a whole multiple of the sample interval");
 
 #define SPB_GROUP_ID "GR4"
 #define SPB_EDGE_NODE_ID CONFIG_MQTT_CLIENT_ID
@@ -36,6 +43,17 @@ static bool clock_synchronized = false;
 /* Sparkplug B state counters */
 static int64_t spb_bdseq = -1;
 static uint8_t spb_seq = 0;
+
+/* One Modbus reading with the time it was taken, held until the next batch publish. */
+struct modbus_sample {
+	uint64_t timestamp_ms;
+	uint16_t adc_millivolts;
+	uint16_t uptime_seconds;
+};
+
+/* Samples collected since the last batch publish; only filled while MQTT is connected. */
+static struct modbus_sample sample_batch[BATCH_SAMPLE_CAPACITY];
+static size_t sample_batch_count = 0;
 
 static uint64_t get_posix_timestamp_ms(void)
 {
@@ -141,36 +159,52 @@ static int publish_spb_birth(void)
 	return return_code;
 }
 
-/* Read the RTU values and publish them as Sparkplug B NDATA JSON; the ADC value is not range checked. */
-static int publish_modbus_uptime(void)
+/* Read the RTU values into the batch; a failed read is logged and skipped. The ADC value is not range checked. */
+static void collect_modbus_sample(void)
 {
-	char payload_json[MODBUS_PAYLOAD_BUFFER_SIZE];
-	uint16_t adc_millivolts;
-	uint16_t uptime_seconds;
-	uint64_t now_ms;
+	struct modbus_sample *sample;
 	int return_code;
 
-	return_code = modbus_reader_read(&adc_millivolts, &uptime_seconds);
-	if (return_code < 0)
+	/* Should not happen with whole-multiple intervals; dropping keeps the buffer bounded */
+	if (sample_batch_count >= BATCH_SAMPLE_CAPACITY)
 	{
-		LOG_ERR("Modbus RTU read failed: %d", return_code);
-		return return_code;
+		LOG_WRN("Sample batch full (%d samples); sample dropped", BATCH_SAMPLE_CAPACITY);
+		return;
 	}
 
-	LOG_INF("Modbus sample: adc = %u mV, uptime = %u s", adc_millivolts, uptime_seconds);
+	sample = &sample_batch[sample_batch_count];
+	return_code = modbus_reader_read(&sample->adc_millivolts, &sample->uptime_seconds);
+	if (return_code < 0)
+	{
+		LOG_ERR("Modbus RTU read failed: %d; sample skipped", return_code);
+		return;
+	}
 
-	now_ms = get_posix_timestamp_ms();
+	sample->timestamp_ms = get_posix_timestamp_ms();
+	sample_batch_count++;
+	LOG_INF("Modbus sample %u/%d: adc = %u mV, uptime = %u s", (unsigned int)sample_batch_count,
+		BATCH_SAMPLE_CAPACITY, sample->adc_millivolts, sample->uptime_seconds);
+}
 
-	/* Format NDATA payload with device_id, Unix ms timestamp, seq and metrics */
+/* Publish one buffered sample as Sparkplug B NDATA JSON. Sparkplug requires the payload timestamp to be the
+ * publish time, so the measurement time goes in each metric's own timestamp. */
+static int publish_modbus_sample(const struct modbus_sample *sample)
+{
+	char payload_json[MODBUS_PAYLOAD_BUFFER_SIZE];
+	int return_code;
+
+	/* Format NDATA payload with device_id, publish timestamp, seq and timestamped metrics */
 	return_code = snprintk(payload_json, sizeof(payload_json),
 		       "{\"timestamp\":%llu,\"device_id\":\"%s\",\"seq\":%u,\"metrics\":["
-		       "{\"name\":\"adc_millivolts\",\"value\":%u},"
-		       "{\"name\":\"uptime_seconds\",\"value\":%u}]}",
-		       (unsigned long long)now_ms,
+		       "{\"name\":\"adc_millivolts\",\"timestamp\":%llu,\"value\":%u},"
+		       "{\"name\":\"uptime_seconds\",\"timestamp\":%llu,\"value\":%u}]}",
+		       (unsigned long long)get_posix_timestamp_ms(),
 		       SPB_EDGE_NODE_ID,
 		       spb_seq,
-		       adc_millivolts,
-		       uptime_seconds);
+		       (unsigned long long)sample->timestamp_ms,
+		       sample->adc_millivolts,
+		       (unsigned long long)sample->timestamp_ms,
+		       sample->uptime_seconds);
 	if (return_code < 0 || return_code >= sizeof(payload_json))
 	{
 		LOG_ERR("Sparkplug NDATA payload formatting failed: %d", return_code);
@@ -181,6 +215,42 @@ static int publish_modbus_uptime(void)
 	spb_seq = (spb_seq + 1) & 0xFF;
 
 	return mqtt_transport_publish_topic(SPB_TOPIC_NDATA, payload_json, MQTT_QOS_0_AT_MOST_ONCE);
+}
+
+/* Publish the buffered samples oldest first as separate NDATA messages; on a failure the rest of the batch is dropped. */
+static void publish_sample_batch(void)
+{
+	size_t published_count = 0;
+	int return_code;
+
+	while (published_count < sample_batch_count)
+	{
+		return_code = publish_modbus_sample(&sample_batch[published_count]);
+		if (return_code < 0)
+		{
+			LOG_ERR("NDATA publish failed: %d; %u of %u samples dropped", return_code,
+				(unsigned int)(sample_batch_count - published_count), (unsigned int)sample_batch_count);
+			break;
+		}
+		published_count++;
+	}
+
+	LOG_INF("Batch published: %u of %u samples", (unsigned int)published_count, (unsigned int)sample_batch_count);
+	sample_batch_count = 0;
+}
+
+/* Start an empty batch on a new MQTT session: sample at once. The publish deadline is the time of the batch's
+ * last sample, so a full batch goes out at once, and a batch with a failed read goes out on time anyway. */
+static void start_sample_batch(int64_t *next_sample_ms, int64_t *next_batch_publish_ms)
+{
+	if (sample_batch_count > 0)
+	{
+		LOG_WRN("Unsent batch of %u samples discarded after reconnect", (unsigned int)sample_batch_count);
+	}
+
+	sample_batch_count = 0;
+	*next_sample_ms = k_uptime_get();
+	*next_batch_publish_ms = *next_sample_ms + BATCH_PUBLISH_INTERVAL_MILLISECONDS - MODBUS_SAMPLE_INTERVAL_MILLISECONDS;
 }
 
 static int establish_mqtt_connection(void)
@@ -223,7 +293,8 @@ static int establish_mqtt_connection(void)
 
 int main(void)
 {
-	int64_t next_modbus_publish_ms = 0;
+	int64_t next_sample_ms = 0;
+	int64_t next_batch_publish_ms = 0;
 	bool modbus_ready = false;
 	int return_code;
 
@@ -237,7 +308,8 @@ int main(void)
 	else
 	{
 		modbus_ready = true;
-		LOG_INF("Modbus RTU client ready; sample interval %d ms", MODBUS_PUBLISH_INTERVAL_MILLISECONDS);
+		LOG_INF("Modbus RTU client ready; sample interval %d ms, batch interval %d ms",
+			MODBUS_SAMPLE_INTERVAL_MILLISECONDS, BATCH_PUBLISH_INTERVAL_MILLISECONDS);
 	}
 
 	if (mqtt_transport_tls_init() < 0)
@@ -260,7 +332,7 @@ int main(void)
 		}
 		else if (synchronize_clock() == 0 && establish_mqtt_connection() == 0)
 		{
-			next_modbus_publish_ms = k_uptime_get();
+			start_sample_batch(&next_sample_ms, &next_batch_publish_ms);
 		}
 	}
 
@@ -281,16 +353,32 @@ int main(void)
 			{
 				if (establish_mqtt_connection() == 0)
 				{
-					next_modbus_publish_ms = k_uptime_get();
+					start_sample_batch(&next_sample_ms, &next_batch_publish_ms);
 				}
 			}
 		}
 
-		if (mqtt_transport_is_connected() && modbus_ready &&
-		    k_uptime_get() >= next_modbus_publish_ms)
+		if (!mqtt_transport_is_connected() || !modbus_ready)
 		{
-			publish_modbus_uptime();
-			next_modbus_publish_ms = k_uptime_get() + MODBUS_PUBLISH_INTERVAL_MILLISECONDS;
+			continue;
+		}
+
+		/* Sample before publishing, so the last sample of a batch goes out in the same loop pass. Fixed-rate deadline,
+		 * so loop delays do not push a sample out of its batch. */
+		if (k_uptime_get() >= next_sample_ms)
+		{
+			collect_modbus_sample();
+			next_sample_ms += MODBUS_SAMPLE_INTERVAL_MILLISECONDS;
+		}
+
+		/* A full batch is published at once; the deadline only sends a batch left short by a failed read */
+		if (sample_batch_count == BATCH_SAMPLE_CAPACITY || k_uptime_get() >= next_batch_publish_ms)
+		{
+			if (sample_batch_count > 0)
+			{
+				publish_sample_batch();
+			}
+			next_batch_publish_ms += BATCH_PUBLISH_INTERVAL_MILLISECONDS;
 		}
 	}
 }
